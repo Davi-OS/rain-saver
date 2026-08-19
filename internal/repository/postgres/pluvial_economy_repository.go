@@ -12,15 +12,15 @@ import (
 )
 
 const (
-	createPluvialEconomyQuery = `INSERT INTO pluvial_economy (endereco_id, user_id, area_m2, period_start, period_end)
-		VALUES ($1, $2, $3, $4, $5)
+	createPluvialEconomyQuery = `INSERT INTO pluvial_economy (endereco_id, user_id, area_m2, period_start, period_end, station_code, distance_km)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id::text, created_at`
 
 	createMonthlyCaptationQuery = `INSERT INTO pluvial_monthly_captation (pluvial_economy_id, year, month, rainfall_mm, captured_liters)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id::text`
 
-	getLatestPluvialEconomyQuery = `SELECT id::text, endereco_id::text, user_id::text, area_m2, period_start, period_end, created_at
+	getLatestPluvialEconomyQuery = `SELECT id::text, endereco_id::text, user_id::text, area_m2, period_start, period_end, created_at, station_code, distance_km
 		FROM pluvial_economy WHERE endereco_id = $1 ORDER BY created_at DESC LIMIT 1`
 
 	getMonthlyCaptationsQuery = `SELECT id::text, pluvial_economy_id::text, year, month, rainfall_mm, captured_liters
@@ -44,7 +44,7 @@ func (r *PluvialEconomyRepository) Create(ctx context.Context, pe *domain.Pluvia
 
 	out := *pe
 	if err := tx.QueryRow(ctx, createPluvialEconomyQuery,
-		pe.EnderecoID, pe.UserID, pe.AreaM2, pe.PeriodStart, pe.PeriodEnd,
+		pe.EnderecoID, pe.UserID, pe.AreaM2, pe.PeriodStart, pe.PeriodEnd, pe.StationCode, pe.DistanceKm,
 	).Scan(&out.ID, &out.CreatedAt); err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func (r *PluvialEconomyRepository) Create(ctx context.Context, pe *domain.Pluvia
 func (r *PluvialEconomyRepository) GetLatestByEnderecoID(ctx context.Context, enderecoID string) (*domain.PluvialEconomy, error) {
 	var out domain.PluvialEconomy
 	err := r.pool.QueryRow(ctx, getLatestPluvialEconomyQuery, enderecoID).
-		Scan(&out.ID, &out.EnderecoID, &out.UserID, &out.AreaM2, &out.PeriodStart, &out.PeriodEnd, &out.CreatedAt)
+		Scan(&out.ID, &out.EnderecoID, &out.UserID, &out.AreaM2, &out.PeriodStart, &out.PeriodEnd, &out.CreatedAt, &out.StationCode, &out.DistanceKm)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, repository.ErrNotFound
 	}

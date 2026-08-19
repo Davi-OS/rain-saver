@@ -16,7 +16,6 @@ import (
 	rainhttp "github.com/Davi-OS/rain-saver/internal/http"
 	"github.com/Davi-OS/rain-saver/internal/repository/postgres"
 	"github.com/Davi-OS/rain-saver/internal/service"
-	"github.com/Davi-OS/rain-saver/internal/weather"
 )
 
 func main() {
@@ -40,10 +39,10 @@ func main() {
 
 	enderecoRepo := postgres.NewEnderecoRepository(pool)
 	economyRepo := postgres.NewPluvialEconomyRepository(pool)
-	weatherClient := weather.NewClient(nil)
+	stationRepo := postgres.NewWeatherStationRepository(pool)
 
 	enderecoSvc := service.NewEnderecoService(enderecoRepo)
-	pluvialSvc := service.NewPluvialService(enderecoRepo, economyRepo, weatherClient)
+	pluvialSvc := service.NewPluvialService(enderecoRepo, economyRepo, stationRepo)
 
 	handler := rainhttp.NewServer(enderecoSvc, pluvialSvc, authClient)
 
@@ -51,7 +50,7 @@ func main() {
 		Addr:         cfg.Addr(),
 		Handler:      handler,
 		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 30 * time.Second, // Open-Meteo round trips can be slow
+		WriteTimeout: 10 * time.Second,
 	}
 
 	go func() {

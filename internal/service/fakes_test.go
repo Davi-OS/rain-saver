@@ -6,7 +6,6 @@ import (
 
 	"github.com/Davi-OS/rain-saver/internal/domain"
 	"github.com/Davi-OS/rain-saver/internal/repository"
-	"github.com/Davi-OS/rain-saver/internal/weather"
 )
 
 type fakeEnderecoRepository struct {
@@ -84,11 +83,21 @@ func (f *fakePluvialEconomyRepository) GetLatestByEnderecoID(ctx context.Context
 	return &pe, nil
 }
 
-type fakeWeatherFetcher struct {
-	daily []weather.DailyRainfall
-	err   error
+type fakeWeatherStationRepository struct {
+	station    *domain.WeatherStation
+	distanceKm float64
+	nearestErr error
+	monthly    []domain.StationMonthlyRainfall
+	monthlyErr error
 }
 
-func (f *fakeWeatherFetcher) FetchDailyRainfall(ctx context.Context, latitude, longitude float64) ([]weather.DailyRainfall, error) {
-	return f.daily, f.err
+func (f *fakeWeatherStationRepository) Nearest(ctx context.Context, latitude, longitude float64) (*domain.WeatherStation, float64, error) {
+	if f.nearestErr != nil {
+		return nil, 0, f.nearestErr
+	}
+	return f.station, f.distanceKm, nil
+}
+
+func (f *fakeWeatherStationRepository) MonthlyRainfall(ctx context.Context, stationCode string, months int) ([]domain.StationMonthlyRainfall, error) {
+	return f.monthly, f.monthlyErr
 }

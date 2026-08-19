@@ -30,6 +30,8 @@ type pluvialEconomyResponse struct {
 	PeriodStart      time.Time                  `json:"period_start"`
 	PeriodEnd        time.Time                  `json:"period_end"`
 	CreatedAt        time.Time                  `json:"created_at"`
+	StationCode      string                     `json:"station_code"`
+	DistanceKm       float64                    `json:"distance_km"`
 	MonthlyCaptation []monthlyCaptationResponse `json:"monthly_captation"`
 }
 
@@ -50,6 +52,8 @@ func pluvialEconomyToResponse(pe *domain.PluvialEconomy) pluvialEconomyResponse 
 		PeriodStart:      pe.PeriodStart,
 		PeriodEnd:        pe.PeriodEnd,
 		CreatedAt:        pe.CreatedAt,
+		StationCode:      pe.StationCode,
+		DistanceKm:       pe.DistanceKm,
 		MonthlyCaptation: months,
 	}
 }
@@ -72,8 +76,8 @@ func (s *Server) handleCalculatePluvialEconomy(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "endereco not found")
 		return
 	}
-	if errors.Is(err, service.ErrWeatherProvider) {
-		writeError(c, http.StatusBadGateway, "weather provider error")
+	if errors.Is(err, service.ErrNoStationAvailable) {
+		writeError(c, http.StatusServiceUnavailable, "no weather station available")
 		return
 	}
 	if err != nil {

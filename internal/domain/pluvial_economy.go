@@ -11,6 +11,11 @@ type PluvialEconomy struct {
 	PeriodEnd   time.Time
 	CreatedAt   time.Time
 
+	// StationCode and DistanceKm record which weather station fed this
+	// calculation and how far it is from the address, for auditability.
+	StationCode string
+	DistanceKm  float64
+
 	MonthlyCaptation []PluvialMonthlyCaptation
 }
 

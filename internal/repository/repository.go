@@ -28,3 +28,16 @@ type PluvialEconomyRepository interface {
 	// none has ever been run.
 	GetLatestByEnderecoID(ctx context.Context, enderecoID string) (*domain.PluvialEconomy, error)
 }
+
+type WeatherStationRepository interface {
+	// Nearest returns the closest station to the given coordinates (via a
+	// Haversine distance computed in SQL) and the distance in km.
+	// ErrNotFound if no station is registered at all.
+	Nearest(ctx context.Context, latitude, longitude float64) (*domain.WeatherStation, float64, error)
+	// MonthlyRainfall returns up to the most recent `months` (year, month)
+	// rows already compiled for the station, in chronological order. It
+	// does not assume the table holds exactly `months` rows — filtering
+	// happens at read time, so rain-saver stays decoupled from however the
+	// ingestion side decides to retain history.
+	MonthlyRainfall(ctx context.Context, stationCode string, months int) ([]domain.StationMonthlyRainfall, error)
+}

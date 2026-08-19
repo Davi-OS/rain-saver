@@ -1,6 +1,8 @@
 # rain-saver
 
-Backend em Go que gerencia endereços e calcula/entrega economia **mensal** de captação de água de chuva para o front-end do projeto Rain Saver. Login e contas de usuário vivem num serviço separado, o [go-auth-service](https://github.com/Davi-OS/go-auth-service) — este backend não tem cadastro/senha próprios, só valida tokens emitidos por ele.
+Backend em Go que gerencia endereços e calcula/entrega economia **mensal** de captação de água de chuva para o front-end do projeto Rain Saver, usando a chuva histórica da **estação INMET mais próxima** de cada endereço. Login e contas de usuário vivem num serviço separado, o [go-auth-service](https://github.com/Davi-OS/go-auth-service) — este backend não tem cadastro/senha próprios, só valida tokens emitidos por ele.
+
+Os dados de chuva (`weather_stations`, `station_monthly_rainfall`) são povoados por um processo de ingestão do INMET separado (fora deste repositório, ainda não construído) — este backend só **lê** dessas tabelas, já compiladas por mês/estação. Veja a seção de setup local para semear dados de teste enquanto essa ingestão não existe.
 
 ## Stack
 
@@ -48,7 +50,17 @@ go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 migrate -database "postgres://rainsaver:rainsaver@localhost:5433/rainsaver?sslmode=disable" -path migrations up
 ```
 
-### 4. go-auth-service local + pré-requisito de audience
+### 4. Dados de estação/chuva (dev)
+
+Como a ingestão real do INMET ainda não existe, semeie estações e chuva mensal sintéticas pra testar localmente:
+
+```bash
+psql "postgres://rainsaver:rainsaver@localhost:5433/rainsaver?sslmode=disable" -f scripts/seed_dev_stations.sql
+```
+
+Isso não é uma migration — é só um fixture de desenvolvimento (`scripts/seed_dev_stations.sql`), nunca roda em produção.
+
+### 5. go-auth-service local + pré-requisito de audience
 
 Este serviço só aceita tokens cuja audience seja `"rain-saver"`. Isso exige uma linha na tabela `systems` do banco do go-auth-service — não existe endpoint HTTP para isso, é um passo manual:
 
@@ -58,7 +70,7 @@ INSERT INTO systems (name, slug) VALUES ('Rain Saver', 'rain-saver');
 
 Depois, com o go-auth-service rodando localmente (porta padrão `8080`), autentique um usuário de teste via `POST /login` com `"system": "rain-saver"` para obter um `access_token`.
 
-### 5. Rodar
+### 6. Rodar
 
 ```bash
 go run ./cmd/api
@@ -87,3 +99,5 @@ Ver `internal/http/openapi.yaml` (ou `/docs` com o servidor rodando) para a espe
 | POST, GET | `/enderecos/:id/pluvial-economy` | sim |
 
 Todas as rotas protegidas exigem `Authorization: Bearer <token>` emitido pelo go-auth-service para a audience `rain-saver`; o `user_id` de cada recurso vem sempre do claim `sub` do token validado, nunca do corpo da requisição.
+
+A resposta de `pluvial-economy` inclui `station_code` e `distance_km` — qual estação INMET foi usada e a que distância do endereço, pra rastreabilidade. Se nenhuma estação estiver cadastrada ainda, o cálculo retorna `503`.

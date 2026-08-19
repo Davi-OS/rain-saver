@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Davi-OS/rain-saver/internal/domain"
 	"github.com/Davi-OS/rain-saver/internal/repository"
 )
@@ -25,6 +27,17 @@ func createTestEndereco(t *testing.T, repo *EnderecoRepository) *domain.Endereco
 	return e
 }
 
+// createTestStation inserts a station row so pluvial_economy.station_code's
+// FK constraint is satisfiable in tests.
+func createTestStation(t *testing.T, pool *pgxpool.Pool, code string) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(),
+		`INSERT INTO weather_stations (code, name, latitude, longitude, uf) VALUES ($1, 'TEST STATION', -23.5, -46.6, 'SP')`, code)
+	if err != nil {
+		t.Fatalf("createTestStation: %v", err)
+	}
+}
+
 func TestPluvialEconomyRepository_CreatePersistsParentAndMonths(t *testing.T) {
 	pool := testPool(t)
 	enderecoRepo := NewEnderecoRepository(pool)
@@ -32,6 +45,7 @@ func TestPluvialEconomyRepository_CreatePersistsParentAndMonths(t *testing.T) {
 	ctx := context.Background()
 
 	e := createTestEndereco(t, enderecoRepo)
+	createTestStation(t, pool, "A701")
 
 	now := time.Now().UTC()
 	pe := &domain.PluvialEconomy{
@@ -40,6 +54,8 @@ func TestPluvialEconomyRepository_CreatePersistsParentAndMonths(t *testing.T) {
 		AreaM2:      100,
 		PeriodStart: now.AddDate(-1, 0, 0),
 		PeriodEnd:   now,
+		StationCode: "A701",
+		DistanceKm:  12.3,
 	}
 	months := []domain.PluvialMonthlyCaptation{
 		{Year: 2026, Month: 1, RainfallMM: 10, CapturedLiters: 1000},
@@ -67,6 +83,9 @@ func TestPluvialEconomyRepository_CreatePersistsParentAndMonths(t *testing.T) {
 	if got.MonthlyCaptation[0].Month != 1 || got.MonthlyCaptation[1].Month != 2 {
 		t.Errorf("months not in order: %+v", got.MonthlyCaptation)
 	}
+	if got.StationCode != "A701" || got.DistanceKm != 12.3 {
+		t.Errorf("StationCode/DistanceKm = %q/%v, want A701/12.3", got.StationCode, got.DistanceKm)
+	}
 }
 
 func TestPluvialEconomyRepository_CreateRollsBackOnDuplicateMonth(t *testing.T) {
@@ -76,6 +95,7 @@ func TestPluvialEconomyRepository_CreateRollsBackOnDuplicateMonth(t *testing.T) 
 	ctx := context.Background()
 
 	e := createTestEndereco(t, enderecoRepo)
+	createTestStation(t, pool, "A701")
 
 	now := time.Now().UTC()
 	pe := &domain.PluvialEconomy{
@@ -84,6 +104,8 @@ func TestPluvialEconomyRepository_CreateRollsBackOnDuplicateMonth(t *testing.T) 
 		AreaM2:      100,
 		PeriodStart: now.AddDate(-1, 0, 0),
 		PeriodEnd:   now,
+		StationCode: "A701",
+		DistanceKm:  12.3,
 	}
 	// Duplicate (year, month) pair violates the unique constraint mid-batch
 	// — the whole parent+children insert must roll back, leaving nothing.
@@ -108,17 +130,18 @@ func TestPluvialEconomyRepository_GetLatestReturnsMostRecent(t *testing.T) {
 	ctx := context.Background()
 
 	e := createTestEndereco(t, enderecoRepo)
+	createTestStation(t, pool, "A701")
 	now := time.Now().UTC()
 
 	first, err := repo.Create(ctx, &domain.PluvialEconomy{
-		EnderecoID: e.ID, UserID: e.UserID, AreaM2: 50, PeriodStart: now, PeriodEnd: now,
+		EnderecoID: e.ID, UserID: e.UserID, AreaM2: 50, PeriodStart: now, PeriodEnd: now, StationCode: "A701",
 	}, []domain.PluvialMonthlyCaptation{{Year: 2025, Month: 1, RainfallMM: 1, CapturedLiters: 50}})
 	if err != nil {
 		t.Fatalf("Create() first error = %v", err)
 	}
 
 	second, err := repo.Create(ctx, &domain.PluvialEconomy{
-		EnderecoID: e.ID, UserID: e.UserID, AreaM2: 75, PeriodStart: now, PeriodEnd: now,
+		EnderecoID: e.ID, UserID: e.UserID, AreaM2: 75, PeriodStart: now, PeriodEnd: now, StationCode: "A701",
 	}, []domain.PluvialMonthlyCaptation{{Year: 2026, Month: 1, RainfallMM: 2, CapturedLiters: 150}})
 	if err != nil {
 		t.Fatalf("Create() second error = %v", err)

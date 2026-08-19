@@ -47,7 +47,8 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	})
 
 	_, err = pool.Exec(ctx, `TRUNCATE TABLE
-		pluvial_monthly_captation, pluvial_economy, enderecos RESTART IDENTITY CASCADE`)
+		pluvial_monthly_captation, pluvial_economy, enderecos,
+		station_monthly_rainfall, weather_stations RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate failed: %v", err)
 	}

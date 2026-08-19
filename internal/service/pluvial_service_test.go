@@ -4,40 +4,43 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/Davi-OS/rain-saver/internal/domain"
-	"github.com/Davi-OS/rain-saver/internal/weather"
+	"github.com/Davi-OS/rain-saver/internal/repository"
 )
-
-func mustDay(t *testing.T, dateStr string, rain float64) weather.DailyRainfall {
-	t.Helper()
-	d, err := time.Parse("2006-01-02", dateStr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return weather.DailyRainfall{Date: d, RainSumMM: rain}
-}
 
 func newTestEndereco() *domain.Endereco {
 	return &domain.Endereco{UserID: "user-1", Logradouro: "Av. Paulista", Number: "1000", Latitude: -23.5, Longitude: -46.6}
 }
 
+func testStation() *domain.WeatherStation {
+	return &domain.WeatherStation{Code: "A701", Name: "SAO PAULO - MIRANTE", Latitude: -23.4977, Longitude: -46.6202}
+}
+
 func TestPluvialService_CalculateComputesCapturedLiters(t *testing.T) {
 	enderecoRepo := newFakeEnderecoRepository()
 	economyRepo := newFakePluvialEconomyRepository()
-	fetcher := &fakeWeatherFetcher{daily: []weather.DailyRainfall{
-		mustDay(t, "2026-01-10", 10),
-		mustDay(t, "2026-01-20", 10),
-		mustDay(t, "2026-02-05", 5),
-	}}
-	svc := NewPluvialService(enderecoRepo, economyRepo, fetcher)
+	stations := &fakeWeatherStationRepository{
+		station:    testStation(),
+		distanceKm: 8.456,
+		monthly: []domain.StationMonthlyRainfall{
+			{StationCode: "A701", Year: 2026, Month: 1, RainfallMM: 20},
+			{StationCode: "A701", Year: 2026, Month: 2, RainfallMM: 5},
+		},
+	}
+	svc := NewPluvialService(enderecoRepo, economyRepo, stations)
 
 	e, _ := enderecoRepo.Create(context.Background(), newTestEndereco())
 
 	pe, err := svc.Calculate(context.Background(), e.ID, e.UserID, 100)
 	if err != nil {
 		t.Fatalf("Calculate() error = %v", err)
+	}
+	if pe.StationCode != "A701" {
+		t.Errorf("StationCode = %q, want A701", pe.StationCode)
+	}
+	if pe.DistanceKm != 8.46 {
+		t.Errorf("DistanceKm = %v, want 8.46 (rounded)", pe.DistanceKm)
 	}
 	if len(pe.MonthlyCaptation) != 2 {
 		t.Fatalf("got %d months, want 2: %+v", len(pe.MonthlyCaptation), pe.MonthlyCaptation)
@@ -57,8 +60,8 @@ func TestPluvialService_CalculateComputesCapturedLiters(t *testing.T) {
 func TestPluvialService_CalculateReturnsNotFoundForWrongOwner(t *testing.T) {
 	enderecoRepo := newFakeEnderecoRepository()
 	economyRepo := newFakePluvialEconomyRepository()
-	fetcher := &fakeWeatherFetcher{}
-	svc := NewPluvialService(enderecoRepo, economyRepo, fetcher)
+	stations := &fakeWeatherStationRepository{station: testStation()}
+	svc := NewPluvialService(enderecoRepo, economyRepo, stations)
 
 	e, _ := enderecoRepo.Create(context.Background(), newTestEndereco())
 
@@ -67,23 +70,23 @@ func TestPluvialService_CalculateReturnsNotFoundForWrongOwner(t *testing.T) {
 	}
 }
 
-func TestPluvialService_CalculateWrapsWeatherProviderError(t *testing.T) {
+func TestPluvialService_CalculateReturnsErrNoStationAvailable(t *testing.T) {
 	enderecoRepo := newFakeEnderecoRepository()
 	economyRepo := newFakePluvialEconomyRepository()
-	fetcher := &fakeWeatherFetcher{err: errors.New("boom")}
-	svc := NewPluvialService(enderecoRepo, economyRepo, fetcher)
+	stations := &fakeWeatherStationRepository{nearestErr: repository.ErrNotFound}
+	svc := NewPluvialService(enderecoRepo, economyRepo, stations)
 
 	e, _ := enderecoRepo.Create(context.Background(), newTestEndereco())
 
-	if _, err := svc.Calculate(context.Background(), e.ID, e.UserID, 100); !errors.Is(err, ErrWeatherProvider) {
-		t.Errorf("Calculate() error = %v, want ErrWeatherProvider", err)
+	if _, err := svc.Calculate(context.Background(), e.ID, e.UserID, 100); !errors.Is(err, ErrNoStationAvailable) {
+		t.Errorf("Calculate() error = %v, want ErrNoStationAvailable", err)
 	}
 }
 
 func TestPluvialService_LatestReturnsNotFoundWhenNoneCalculated(t *testing.T) {
 	enderecoRepo := newFakeEnderecoRepository()
 	economyRepo := newFakePluvialEconomyRepository()
-	svc := NewPluvialService(enderecoRepo, economyRepo, &fakeWeatherFetcher{})
+	svc := NewPluvialService(enderecoRepo, economyRepo, &fakeWeatherStationRepository{})
 
 	e, _ := enderecoRepo.Create(context.Background(), newTestEndereco())
 

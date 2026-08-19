@@ -2,10 +2,12 @@ openapi: 3.0.3
 info:
   title: rain-saver API
   description: >
-    Manages addresses and calculates monthly rainwater-capture savings.
-    User accounts and login live in the separate go-auth-service; every
-    business endpoint here requires a bearer access token issued for the
-    "rain-saver" audience.
+    Manages addresses and calculates monthly rainwater-capture savings
+    against the nearest INMET weather station's already-compiled monthly
+    rainfall, stored in our own database (populated by a separate
+    ingestion process). User accounts and login live in the separate
+    go-auth-service; every business endpoint here requires a bearer
+    access token issued for the "rain-saver" audience.
   version: "1.0.0"
 servers:
   - url: http://localhost:8081
@@ -119,8 +121,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
-        "502":
-          description: Weather provider error
+        "503":
+          description: No weather station registered yet
           content:
             application/json:
               schema:
@@ -275,6 +277,13 @@ components:
         created_at:
           type: string
           format: date-time
+        station_code:
+          type: string
+          description: Code of the INMET station used for this calculation
+        distance_km:
+          type: number
+          format: double
+          description: Distance in km between the address and the station used
         monthly_captation:
           type: array
           items:

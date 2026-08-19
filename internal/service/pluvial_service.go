@@ -8,42 +8,46 @@ import (
 
 	"github.com/Davi-OS/rain-saver/internal/domain"
 	"github.com/Davi-OS/rain-saver/internal/repository"
-	"github.com/Davi-OS/rain-saver/internal/weather"
 )
 
-// weatherFetcher is the slice of weather.Client this service depends on,
-// so tests can substitute a fake without a network call.
-type weatherFetcher interface {
-	FetchDailyRainfall(ctx context.Context, latitude, longitude float64) ([]weather.DailyRainfall, error)
-}
+const rainfallWindowMonths = 12
 
 type PluvialService struct {
 	enderecos repository.EnderecoRepository
 	economies repository.PluvialEconomyRepository
-	weather   weatherFetcher
+	stations  repository.WeatherStationRepository
 }
 
-func NewPluvialService(enderecos repository.EnderecoRepository, economies repository.PluvialEconomyRepository, weather weatherFetcher) *PluvialService {
-	return &PluvialService{enderecos: enderecos, economies: economies, weather: weather}
+func NewPluvialService(enderecos repository.EnderecoRepository, economies repository.PluvialEconomyRepository, stations repository.WeatherStationRepository) *PluvialService {
+	return &PluvialService{enderecos: enderecos, economies: economies, stations: stations}
 }
 
-// Calculate fetches a year of daily rainfall for the address, buckets it by
-// calendar month, computes captured liters (area_m2 * rainfall_mm per
-// month, 1mm over 1m² == 1L, same physics as the old backend) and persists
-// the result. Returns ErrEnderecoNotFound if the address doesn't exist or
-// doesn't belong to userID.
+// Calculate finds the INMET station nearest to the address and reads its
+// last 12 months of rainfall — already compiled per month by the ingestion
+// side, so no bucketing happens here. Computes captured liters (area_m2*
+// rainfall_mm per month, 1mm over 1m² == 1L, same physics as the old
+// backend) and persists the result, including which station fed it and
+// how far away it is, for auditability. Returns ErrEnderecoNotFound if the
+// address doesn't exist or doesn't belong to userID, or
+// ErrNoStationAvailable if no weather station is registered at all.
 func (s *PluvialService) Calculate(ctx context.Context, enderecoID, userID string, areaM2 float64) (*domain.PluvialEconomy, error) {
 	e, err := s.ownedEndereco(ctx, enderecoID, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	daily, err := s.weather.FetchDailyRainfall(ctx, e.Latitude, e.Longitude)
+	station, distanceKm, err := s.stations.Nearest(ctx, e.Latitude, e.Longitude)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, ErrNoStationAvailable
+	}
 	if err != nil {
-		return nil, errors.Join(ErrWeatherProvider, err)
+		return nil, err
 	}
 
-	monthly := weather.BucketByCalendarMonth(daily)
+	monthly, err := s.stations.MonthlyRainfall(ctx, station.Code, rainfallWindowMonths)
+	if err != nil {
+		return nil, err
+	}
 
 	now := time.Now().UTC()
 	pe := &domain.PluvialEconomy{
@@ -52,6 +56,8 @@ func (s *PluvialService) Calculate(ctx context.Context, enderecoID, userID strin
 		AreaM2:      areaM2,
 		PeriodStart: now.AddDate(-1, 0, 0),
 		PeriodEnd:   now,
+		StationCode: station.Code,
+		DistanceKm:  roundToTwoDecimals(distanceKm),
 	}
 
 	months := make([]domain.PluvialMonthlyCaptation, len(monthly))
@@ -59,7 +65,7 @@ func (s *PluvialService) Calculate(ctx context.Context, enderecoID, userID strin
 		months[i] = domain.PluvialMonthlyCaptation{
 			Year:           m.Year,
 			Month:          m.Month,
-			RainfallMM:     roundToTwoDecimals(m.RainfallMM),
+			RainfallMM:     m.RainfallMM,
 			CapturedLiters: roundToTwoDecimals(areaM2 * m.RainfallMM),
 		}
 	}
