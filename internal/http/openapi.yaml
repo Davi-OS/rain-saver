@@ -1,0 +1,283 @@
+openapi: 3.0.3
+info:
+  title: rain-saver API
+  description: >
+    Manages addresses and calculates monthly rainwater-capture savings.
+    User accounts and login live in the separate go-auth-service; every
+    business endpoint here requires a bearer access token issued for the
+    "rain-saver" audience.
+  version: "1.0.0"
+servers:
+  - url: http://localhost:8081
+tags:
+  - name: enderecos
+  - name: pluvial-economy
+  - name: health
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      summary: Liveness/readiness probe
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+  /enderecos:
+    post:
+      tags: [enderecos]
+      summary: Create an address for the authenticated user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnderecoCreateRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Endereco"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      tags: [enderecos]
+      summary: List addresses belonging to the authenticated user
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Endereco"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /enderecos/{id}:
+    get:
+      tags: [enderecos]
+      summary: Get an address by id
+      parameters:
+        - $ref: "#/components/parameters/EnderecoID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Endereco"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [enderecos]
+      summary: Delete an address
+      parameters:
+        - $ref: "#/components/parameters/EnderecoID"
+      responses:
+        "204":
+          description: No Content
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /enderecos/{id}/pluvial-economy:
+    post:
+      tags: [pluvial-economy]
+      summary: Calculate and persist monthly rainwater-capture savings for an address
+      parameters:
+        - $ref: "#/components/parameters/EnderecoID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PluvialEconomyCalculateRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluvialEconomy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          description: Weather provider error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    get:
+      tags: [pluvial-economy]
+      summary: Get the most recently calculated monthly rainwater-capture savings for an address
+      parameters:
+        - $ref: "#/components/parameters/EnderecoID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluvialEconomy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    EnderecoID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Invalid request body
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Missing, invalid, revoked, or wrong-audience token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found (or not owned by the authenticated user)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+    EnderecoCreateRequest:
+      type: object
+      required: [logradouro, number, latitude, longitude]
+      properties:
+        logradouro:
+          type: string
+        number:
+          type: string
+        cep:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        cidade:
+          type: string
+        estado:
+          type: string
+    Endereco:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        logradouro:
+          type: string
+        number:
+          type: string
+        cep:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        cidade:
+          type: string
+        estado:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PluvialEconomyCalculateRequest:
+      type: object
+      required: [area_m2]
+      properties:
+        area_m2:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+    MonthlyCaptation:
+      type: object
+      properties:
+        year:
+          type: integer
+        month:
+          type: integer
+          minimum: 1
+          maximum: 12
+        rainfall_mm:
+          type: number
+          format: double
+        captured_liters:
+          type: number
+          format: double
+    PluvialEconomy:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        endereco_id:
+          type: string
+          format: uuid
+        area_m2:
+          type: number
+          format: double
+        period_start:
+          type: string
+          format: date-time
+        period_end:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        monthly_captation:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonthlyCaptation"
+security:
+  - bearerAuth: []
