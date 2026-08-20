@@ -3,7 +3,7 @@ module github.com/Davi-OS/rain-saver
 go 1.25.0
 
 require (
-	github.com/Davi-OS/go-auth-service v0.0.1-test.0.20260725173458-305d304dfeb6
+	github.com/Davi-OS/go-auth-service v0.0.1-test.0.20260725173458-53314afdf49e
 	github.com/gin-gonic/gin v1.12.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.10.0
