@@ -73,3 +73,16 @@ func TestAddr(t *testing.T) {
 		t.Errorf("Addr() = %q, want :8081", got)
 	}
 }
+
+func TestCORSAllowedOrigins(t *testing.T) {
+	t.Setenv("CORS_ALLOWED_ORIGINS", " http://localhost:5173 , ,https://davi-os.github.io")
+	got := Load().CORSAllowedOrigins
+	if len(got) != 2 || got[0] != "http://localhost:5173" || got[1] != "https://davi-os.github.io" {
+		t.Errorf("CORSAllowedOrigins = %q", got)
+	}
+
+	t.Setenv("CORS_ALLOWED_ORIGINS", "")
+	if got := Load().CORSAllowedOrigins; len(got) != 0 {
+		t.Errorf("empty env: CORSAllowedOrigins = %q, want none", got)
+	}
+}

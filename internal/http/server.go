@@ -16,11 +16,12 @@ type Server struct {
 	authClient *authsdk.Client
 }
 
-func NewServer(enderecos *service.EnderecoService, pluvial *service.PluvialService, authClient *authsdk.Client) *Server {
+// allowedOrigins configures CORS for browser clients (empty disables it).
+func NewServer(enderecos *service.EnderecoService, pluvial *service.PluvialService, authClient *authsdk.Client, allowedOrigins []string) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
-	router.Use(gin.Recovery(), maxBodySizeMiddleware)
+	router.Use(gin.Recovery(), corsMiddleware(allowedOrigins), maxBodySizeMiddleware)
 
 	s := &Server{router: router, enderecos: enderecos, pluvial: pluvial, authClient: authClient}
 	s.routes()

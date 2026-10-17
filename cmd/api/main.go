@@ -44,7 +44,7 @@ func main() {
 	enderecoSvc := service.NewEnderecoService(enderecoRepo)
 	pluvialSvc := service.NewPluvialService(enderecoRepo, economyRepo, stationRepo)
 
-	handler := rainhttp.NewServer(enderecoSvc, pluvialSvc, authClient)
+	handler := rainhttp.NewServer(enderecoSvc, pluvialSvc, authClient, cfg.CORSAllowedOrigins)
 
 	httpServer := &http.Server{
 		Addr:         cfg.Addr(),
