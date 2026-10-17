@@ -13,6 +13,7 @@ import (
 	"github.com/Davi-OS/go-auth-service/pkg/authsdk"
 
 	"github.com/Davi-OS/rain-saver/internal/config"
+	"github.com/Davi-OS/rain-saver/internal/geocoding"
 	rainhttp "github.com/Davi-OS/rain-saver/internal/http"
 	"github.com/Davi-OS/rain-saver/internal/repository/postgres"
 	"github.com/Davi-OS/rain-saver/internal/service"
@@ -41,7 +42,7 @@ func main() {
 	economyRepo := postgres.NewPluvialEconomyRepository(pool)
 	stationRepo := postgres.NewWeatherStationRepository(pool)
 
-	enderecoSvc := service.NewEnderecoService(enderecoRepo)
+	enderecoSvc := service.NewEnderecoService(enderecoRepo, geocoding.NewNominatim(cfg.GeocoderURL, cfg.GeocoderUserAgent))
 	pluvialSvc := service.NewPluvialService(enderecoRepo, economyRepo, stationRepo)
 
 	handler := rainhttp.NewServer(enderecoSvc, pluvialSvc, authClient, cfg.CORSAllowedOrigins)

@@ -7,12 +7,15 @@ roda um teste ponta a ponta da integração.
 cd deploy/local
 ./build.sh                    # compila os binários no host (ver abaixo)
 docker compose up --build -d
-./e2e.sh                      # 43 checks; idempotente
+./e2e.sh                      # 56 checks; idempotente
 docker compose down -v        # -v apaga bancos e a chave de assinatura
 ```
 
 Pré-requisitos: Go, Docker Compose v2, `curl`, `jq` e o checkout do
-go-auth-service ao lado deste repo (ou `AUTH_SERVICE_DIR=/caminho`).
+go-auth-service ao lado deste repo (ou `AUTH_SERVICE_DIR=/caminho`). A
+geocodificação de endereços usa o Nominatim público, então precisa de
+internet (o serviço `rain-saver` usa DNS 1.1.1.1/8.8.8.8 para isso); para
+rodar o `e2e.sh` offline, use `E2E_SKIP_GEOCODING=1`.
 
 | Serviço | URL no host |
 |---|---|
@@ -55,7 +58,9 @@ aqui. Rode `./build.sh` de novo sempre que mudar código Go.
 ## O que o `e2e.sh` cobre
 
 CORS do front (`http://localhost:5173`, configurável por `CORS_ALLOWED_ORIGINS`), login com `aud=rain-saver` e claims (`iss`, `aud`, `org`, `perms`), `/me`,
-criação de usuário por admin, isolamento de dados entre usuários, cálculo
+criação de usuário por admin, 403 para conta sem permissão no rain-saver,
+validação e geocodificação de endereço (Nominatim, 422 para endereço
+inexistente), isolamento de dados entre usuários, cálculo
 pluvial, rejeição de token (sem token, outra audience, claims adulteradas,
 lixo), rotação de refresh e reuso, propagação de `logout` e `logout-all` até o
 rain-saver (polling de revogações, até `REVOCATION_WAIT_SECS`) e restart do

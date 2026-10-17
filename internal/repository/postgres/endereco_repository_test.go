@@ -18,6 +18,7 @@ func TestEnderecoRepository_CreateAndGetByID(t *testing.T) {
 		UserID:     "11111111-1111-1111-1111-111111111111",
 		Logradouro: "Av. Paulista",
 		Number:     "1000",
+		Bairro:     "Bela Vista",
 		Cep:        "01310-100",
 		Latitude:   -23.561684,
 		Longitude:  -46.655981,
@@ -37,7 +38,7 @@ func TestEnderecoRepository_CreateAndGetByID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID() error = %v", err)
 	}
-	if got.Logradouro != in.Logradouro || got.UserID != in.UserID || got.Latitude != in.Latitude {
+	if got.Logradouro != in.Logradouro || got.UserID != in.UserID || got.Latitude != in.Latitude || got.Bairro != in.Bairro {
 		t.Errorf("GetByID() = %+v, want fields matching %+v", got, in)
 	}
 }

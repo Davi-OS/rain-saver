@@ -11,6 +11,8 @@ AUTH=${AUTH_URL:-http://localhost:8080}
 RS=${RAIN_SAVER_URL:-http://localhost:8081}
 DEV_EMAIL=${DEVSEED_EMAIL:-dev@rainsaver.local}
 DEV_PASS=${DEVSEED_PASSWORD:-rainsaver-dev-pass}
+NOACCESS_EMAIL=semacesso@rainsaver.local
+NOACCESS_PASS=sem-acesso-123
 MARIA_EMAIL=maria@rainsaver.local
 MARIA_PASS=maria-pass-123
 # Revocations reach rain-saver via polling (SDK default: every 5s).
@@ -117,6 +119,17 @@ login "$MARIA_EMAIL" "$MARIA_PASS" rain-saver; check "maria logs in for rain-sav
 maria_access=$access
 assert "maria's token has role member" test "$(claims "$maria_access" | jq -c .roles)" = '["member"]'
 
+req POST "$AUTH/orgs/$org/users" "$admin_access" \
+  "{\"email\":\"$NOACCESS_EMAIL\",\"password\":\"$NOACCESS_PASS\",\"role\":\"member\"}" # auth-only member
+if [[ $status == 409 ]]; then status=201; fi
+check "owner creates an account with no rain-saver role" 201
+
+echo "== permissions"
+login "$NOACCESS_EMAIL" "$NOACCESS_PASS" rain-saver; check "account without rain-saver role still gets a token" 200
+assert "...but it carries no org and no perms" test "$(claims "$access" | jq -c '[.org, (.perms // [] | length)]')" = '[null,0]'
+req GET "$RS/enderecos" "$access"; check "rain-saver rejects it on reads (403)" 403
+req POST "$RS/enderecos" "$access" '{"logradouro":"X","number":"1","latitude":0,"longitude":0}'; check "rain-saver rejects it on writes (403)" 403
+
 echo "== protected routes and ownership"
 req POST "$RS/enderecos" "$dev_access" \
   '{"logradouro":"Av. Paulista","number":"1000","cep":"01310-100","latitude":-23.5614,"longitude":-46.6559,"cidade":"Sao Paulo","estado":"SP"}'
@@ -127,6 +140,28 @@ assert "list contains the new endereco" jqok --arg id "$endereco" 'map(.id) | in
 req GET "$RS/enderecos/$endereco" "$maria_access"; check "maria cannot see dev's endereco (404)" 404
 req GET "$RS/enderecos" "$maria_access"; check "maria lists her enderecos" 200
 assert "maria's list excludes dev's endereco" jqok --arg id "$endereco" 'map(.id) | index($id) == null' <<<"$body"
+
+echo "== address validation and geocoding"
+req POST "$RS/enderecos" "$dev_access" '{"logradouro":"X","number":"1","latitude":-23.5}'
+check "latitude without longitude -> 400" 400
+req POST "$RS/enderecos" "$dev_access" '{"logradouro":"X","number":"1"}'
+check "no coordinates and no cidade/estado -> 400" 400
+if [[ -n ${E2E_SKIP_GEOCODING:-} ]]; then
+  echo "  skip geocoding against Nominatim (E2E_SKIP_GEOCODING set)"
+else
+  req POST "$RS/enderecos" "$dev_access" \
+    '{"logradouro":"Avenida Paulista","number":"1000","bairro":"Bela Vista","cep":"01310-100","cidade":"São Paulo","estado":"SP"}'
+  check "address without coordinates is geocoded (Nominatim)" 201
+  geocoded=$(jq -r .id <<<"$body")
+  assert "geocoded point is on Av. Paulista (lat -23.56±0.02, lon -46.65±0.02)" \
+    jqok '(.latitude + 23.56 | fabs) < 0.02 and (.longitude + 46.65 | fabs) < 0.02' <<<"$body"
+  assert "bairro is stored" test "$(jq -r .bairro <<<"$body")" = "Bela Vista"
+  req POST "$RS/enderecos/$geocoded/pluvial-economy" "$dev_access" '{"area_m2":50}'
+  assert "geocoded address resolves to station A701" test "$(jq -r .station_code <<<"$body")" = A701
+  req DELETE "$RS/enderecos/$geocoded" "$dev_access"; check "delete geocoded address" 204
+  req POST "$RS/enderecos" "$dev_access" '{"logradouro":"Rua Que Nao Existe Xyzzy","number":"1","cidade":"Cidade Inexistente Qwerty","estado":"ZZ"}'
+  check "unknown address -> 422" 422
+fi
 
 echo "== pluvial economy (dev station fixture)"
 req POST "$RS/enderecos/$endereco/pluvial-economy" "$dev_access" '{"area_m2":120}'; check "calculate pluvial economy" 201

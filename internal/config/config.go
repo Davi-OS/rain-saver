@@ -20,6 +20,12 @@ type Config struct {
 
 	AuthServiceBaseURL string
 
+	// GeocoderURL is the Nominatim instance used to locate addresses sent
+	// without coordinates; GeocoderUserAgent identifies this app to it, as
+	// Nominatim's usage policy requires.
+	GeocoderURL       string
+	GeocoderUserAgent string
+
 	// CORSAllowedOrigins are the browser origins (e.g. http://localhost:5173)
 	// allowed to call the API. Empty disables CORS.
 	CORSAllowedOrigins []string
@@ -43,6 +49,9 @@ func Load() *Config {
 		PostgresDB:       envOrDefault("POSTGRES_DB", "rainsaver"),
 
 		AuthServiceBaseURL: envOrDefault("AUTH_SERVICE_BASE_URL", "http://localhost:8080"),
+
+		GeocoderURL:       envOrDefault("GEOCODER_URL", "https://nominatim.openstreetmap.org"),
+		GeocoderUserAgent: envOrDefault("GEOCODER_USER_AGENT", "rain-saver (+https://github.com/Davi-OS/rain-saver)"),
 
 		CORSAllowedOrigins: envList("CORS_ALLOWED_ORIGINS"),
 	}

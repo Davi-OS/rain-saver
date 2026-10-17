@@ -60,15 +60,15 @@ psql "postgres://rainsaver:rainsaver@localhost:5433/rainsaver?sslmode=disable" -
 
 Isso não é uma migration — é só um fixture de desenvolvimento (`scripts/seed_dev_stations.sql`), nunca roda em produção.
 
-### 5. go-auth-service local + pré-requisito de audience
+### 5. go-auth-service local + sistema `rain-saver`
 
-Este serviço só aceita tokens cuja audience seja `"rain-saver"`. Isso exige uma linha na tabela `systems` do banco do go-auth-service — não existe endpoint HTTP para isso, é um passo manual:
+Este serviço só aceita tokens com audience `"rain-saver"` e exige as permissões `endereco:read`, `endereco:write` e `pluvial:calculate`. O jeito mais simples de ter tudo isso localmente é o seed de dev do go-auth-service, que registra o sistema, suas permissões e roles, a org `demo` e o usuário `dev@rainsaver.local` / `rainsaver-dev-pass`:
 
-```sql
-INSERT INTO systems (name, slug) VALUES ('Rain Saver', 'rain-saver');
+```bash
+cd ../go-auth-service && go run ./cmd/devseed -dev
 ```
 
-Depois, com o go-auth-service rodando localmente (porta padrão `8080`), autentique um usuário de teste via `POST /login` com `"system": "rain-saver"` para obter um `access_token`.
+Depois, com o go-auth-service rodando (porta padrão `8080`), faça `POST /login` com `"system": "rain-saver"` para obter um `access_token`. Para subir tudo junto (bancos, migrations, seeds e os dois serviços) use a stack em [`deploy/local`](deploy/local/README.md).
 
 ### 6. Rodar
 
@@ -100,14 +100,16 @@ Sem a variável esses testes são pulados (`t.Skip`, visível com `-v`); com um 
 
 Ver `internal/http/openapi.yaml` (ou `/docs` com o servidor rodando) para a especificação completa. Resumo:
 
-| Método | Rota | Auth |
+| Método | Rota | Permissão |
 |---|---|---|
-| GET | `/healthz` | não |
-| GET | `/openapi.yaml`, `/docs` | não |
-| POST, GET | `/enderecos` | sim |
-| GET, DELETE | `/enderecos/:id` | sim |
-| POST, GET | `/enderecos/:id/pluvial-economy` | sim |
+| GET | `/healthz` | — (público) |
+| GET | `/openapi.yaml`, `/docs` | — (público) |
+| POST / GET | `/enderecos` | `endereco:write` / `endereco:read` |
+| GET / DELETE | `/enderecos/:id` | `endereco:read` / `endereco:write` |
+| POST / GET | `/enderecos/:id/pluvial-economy` | `pluvial:calculate` / `endereco:read` |
 
-Todas as rotas protegidas exigem `Authorization: Bearer <token>` emitido pelo go-auth-service para a audience `rain-saver`; o `user_id` de cada recurso vem sempre do claim `sub` do token validado, nunca do corpo da requisição.
+`POST /enderecos` aceita `latitude`/`longitude` opcionais: sem elas o endereço é geocodificado via Nominatim (OpenStreetMap) a partir de logradouro, número, cidade e UF — `422` se não for localizado, `503` se o geocodificador estiver fora.
+
+Sem a permissão da rota a resposta é `403`. Todas as rotas protegidas exigem `Authorization: Bearer <token>` emitido pelo go-auth-service para a audience `rain-saver`; o `user_id` de cada recurso vem sempre do claim `sub` do token validado, nunca do corpo da requisição.
 
 A resposta de `pluvial-economy` inclui `station_code` e `distance_km` — qual estação INMET foi usada e a que distância do endereço, pra rastreabilidade. Se nenhuma estação estiver cadastrada ainda, o cálculo retorna `503`.
