@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,9 +18,19 @@ const testDBLockID = 573_918_264
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
+	// These tests TRUNCATE every table, so they never fall back to a default
+	// DSN (that used to be the dev database) and only run against a database
+	// explicitly named *_test.
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
-		dsn = "postgres://rainsaver:rainsaver@localhost:5433/rainsaver?sslmode=disable"
+		t.Skip("TEST_DATABASE_URL not set: skipping Postgres tests (point it at a throwaway *_test database)")
+	}
+	pgCfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("invalid TEST_DATABASE_URL: %v", err)
+	}
+	if db := pgCfg.ConnConfig.Database; !strings.HasSuffix(db, "_test") {
+		t.Fatalf("TEST_DATABASE_URL points at database %q: refusing to run, these tests TRUNCATE every table; use a database whose name ends in _test", db)
 	}
 
 	ctx := context.Background()

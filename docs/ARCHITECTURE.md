@@ -311,7 +311,7 @@ ALTER TABLE pluvial_economy
 
 ## Testes
 
-- `go test ./...`. Testes de repositório contra Postgres real usam `testutil_test.go`: pool via `TEST_DATABASE_URL` (default `postgres://rainsaver:rainsaver@localhost:5433/rainsaver?sslmode=disable`); **skip automático** (não falha) se o banco não estiver acessível; usa um **advisory lock** (`573_918_264`, escolhido para não colidir com o `918_273_645` do go-auth-service) para serializar os testes contra um banco compartilhado, e faz `TRUNCATE ... RESTART IDENTITY CASCADE` antes de cada rodada.
+- `go test ./...`. Testes de repositório contra Postgres real usam `testutil_test.go`: pool via `TEST_DATABASE_URL`, sem default (antes caía no banco de dev): **skip** se a variável não estiver definida ou o banco não estiver acessível, e **falha** se o nome do banco não terminar em `_test`; usa um **advisory lock** (`573_918_264`, escolhido para não colidir com o `918_273_645` do go-auth-service) para serializar os testes contra um banco compartilhado, e faz `TRUNCATE ... RESTART IDENTITY CASCADE` antes de cada rodada.
 - Testes de service usam fakes em memória (`internal/service/fakes_test.go`) — sem necessidade de banco.
 - `internal/http/middleware_test.go` sobe um **servidor JWKS/revocations fake** (`httptest`), assina tokens ES256 com `golang-jwt/jwt/v5` compatíveis com o esquema do go-auth-service, e testa `RequireAuth` fim a fim.
 

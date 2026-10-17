@@ -84,7 +84,17 @@ Serve em `http://localhost:8081`. Docs em `/docs`, spec em `/openapi.yaml`, heal
 go test ./...
 ```
 
-Os testes de `internal/repository/postgres` precisam de um Postgres real (mesmo do passo 3 acima, ou aponte `TEST_DATABASE_URL` para outra instância) — sem ele, esses testes são pulados automaticamente (`t.Skip`), não falham.
+Os testes de `internal/repository/postgres` precisam de um Postgres real e fazem `TRUNCATE` de todas as tabelas, então só rodam contra um banco **descartável** indicado em `TEST_DATABASE_URL`, cujo nome termine em `_test`:
+
+```bash
+# uma vez: cria o banco de teste no container do passo 3 e aplica as migrations
+docker exec rain-saver-postgres psql -U rainsaver -d postgres -c "CREATE DATABASE rainsaver_test"
+for f in migrations/*.up.sql; do docker exec -i rain-saver-postgres psql -U rainsaver -d rainsaver_test -v ON_ERROR_STOP=1 -q < "$f"; done
+
+TEST_DATABASE_URL="postgres://rainsaver:rainsaver@localhost:5433/rainsaver_test?sslmode=disable" go test ./...
+```
+
+Sem a variável esses testes são pulados (`t.Skip`, visível com `-v`); com um banco cujo nome não termina em `_test` eles falham de propósito, para nunca apagar o banco de dev.
 
 ## Rotas
 
