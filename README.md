@@ -60,15 +60,25 @@ psql "postgres://rainsaver:rainsaver@localhost:5433/rainsaver?sslmode=disable" -
 
 Isso não é uma migration — é só um fixture de desenvolvimento (`scripts/seed_dev_stations.sql`), nunca roda em produção.
 
-### 5. go-auth-service local + sistema `rain-saver`
+### 5. go-auth-service (Azure) + sistema `rain-saver`
 
-Este serviço só aceita tokens com audience `"rain-saver"` e exige as permissões `endereco:read`, `endereco:write` e `pluvial:calculate`. O jeito mais simples de ter tudo isso localmente é o seed de dev do go-auth-service, que registra o sistema, suas permissões e roles, a org `demo` e o usuário `dev@rainsaver.local` / `rainsaver-dev-pass`:
+Este serviço só aceita tokens com audience `"rain-saver"` e issuer igual ao `AUTH_ISSUER` do auth, e exige as permissões `endereco:read`, `endereco:write` e `pluvial:calculate`. O auth roda na Azure (`https://ca-auth.lemonmoss-8726f7e4.northcentralus.azurecontainerapps.io`, veja o `docs/DEPLOY_AZURE.md` do go-auth-service). Configure `AUTH_SERVICE_BASE_URL` e `AUTH_ISSUER` com essa URL, como no `.env.example`. No boot, o rain-saver busca o JWKS e encerra se o auth estiver fora do ar (por exemplo, pausado).
+
+O sistema é descrito em [`deploy/auth-system.json`](deploy/auth-system.json) e cadastrado uma única vez por um platform admin, sem seeds:
 
 ```bash
-cd ../go-auth-service && go run ./cmd/devseed -dev
+AUTH=https://ca-auth.lemonmoss-8726f7e4.northcentralus.azurecontainerapps.io
+read -rp 'e-mail: ' EMAIL; read -rsp 'senha: ' PASS; echo
+login() { jq -nc --arg e "$EMAIL" --arg p "$PASS" --arg o "${1:-}" '{email:$e, password:$p, system:"auth"} + (if $o == "" then {} else {org:$o} end)' | curl -s "$AUTH/login" -d @-; }
+PLATFORM=$(login | jq -r '.orgs[]? | select(.slug == "platform") | .id')   # 409 org_required lista as orgs
+ROOT=$(login "$PLATFORM" | jq -r .access_token)
+jq --arg e "$EMAIL" '. + {admin_email: $e}' deploy/auth-system.json |
+  curl -s "$AUTH/systems" -H "Authorization: Bearer $ROOT" -d @- | jq
 ```
 
-Depois, com o go-auth-service rodando (porta padrão `8080`), faça `POST /login` com `"system": "rain-saver"` para obter um `access_token`. Para subir tudo junto (bancos, migrations, seeds e os dois serviços) use a stack em [`deploy/local`](deploy/local/README.md).
+Se a conta só pertence à org `platform`, o primeiro `/login` já devolve o token; nesse caso, use `ROOT=$(login | jq -r .access_token)`. O `admin_email` vira admin do sistema (na org dona `rain-saver`). Uma conta que já existe mantém a senha; uma conta nova entra com a senha inicial (`INITIAL_PASSWORD_PREFIX` + `rain-saver`) e precisa trocá-la em `POST /password/change`. Mudanças posteriores no spec: `PUT /systems/rain-saver` com o mesmo JSON (sem `admin_email`), feito por um admin do sistema.
+
+Depois, `POST /login` com `"system": "rain-saver"` devolve o `access_token` aceito aqui. Para subir o rain-saver com banco e estações de dev e rodar o teste ponta a ponta contra a Azure, use a stack em [`deploy/local`](deploy/local/README.md).
 
 ### 6. Rodar
 

@@ -1,39 +1,19 @@
-# Local integration stack: go-auth-service + rain-saver, each with its own
-# Postgres, migrations and dev seed data. Independent from the per-repo
-# docker-compose.yml files (different project name, no host DB ports by
-# default), so it can run alongside them.
+# Local stack: rain-saver + its Postgres, migrations and dev stations,
+# consuming the go-auth-service deployed on Azure. Independent from the
+# repo's docker-compose.yml (different project name, no host DB port), so it
+# can run alongside it.
 #
 #   cd deploy/local && ./build.sh && docker compose up --build -d
-#   ./e2e.sh
-#   docker compose down -v   # -v also wipes the DBs and the signing key
+#   ./e2e.sh                 # needs E2E_* credentials, see README.md
+#   docker compose down -v   # -v also wipes the DB
 #
-# Binaries are built on the host by build.sh (see why there); images only
-# copy them in. AUTH_SERVICE_DIR points at the go-auth-service checkout
-# (default: sibling of this repo).
+# rain-saver fetches the JWKS at boot and exits if the auth service is
+# unreachable, so the Azure deployment must be running (not paused).
+# The binary is built on the host by build.sh (see why there); the image
+# only copies it in.
 name: rainsaver-local
 
-x-auth-db-env: &auth-db-env
-  POSTGRES_HOST: auth-db
-  POSTGRES_PORT: "5432"
-  POSTGRES_USER: authservice
-  POSTGRES_PASSWORD: authservice
-  POSTGRES_DB: authservice
-
 services:
-  auth-db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: authservice
-      POSTGRES_PASSWORD: authservice
-      POSTGRES_DB: authservice
-    volumes:
-      - auth_db:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U authservice"]
-      interval: 2s
-      timeout: 3s
-      retries: 20
-
   rs-db:
     image: postgres:16-alpine
     environment:
@@ -47,14 +27,6 @@ services:
       interval: 2s
       timeout: 3s
       retries: 20
-
-  auth-migrate:
-    image: migrate/migrate:v4.18.1
-    volumes:
-      - ${AUTH_SERVICE_DIR:-../../../go-auth-service}/migrations:/migrations:ro
-    command: ["-path=/migrations", "-database=postgres://authservice:authservice@auth-db:5432/authservice?sslmode=disable", "up"]
-    depends_on:
-      auth-db: {condition: service_healthy}
 
   rs-migrate:
     image: migrate/migrate:v4.18.1
@@ -73,46 +45,6 @@ services:
     depends_on:
       rs-migrate: {condition: service_completed_successfully}
 
-  # rain-saver system + "demo" org + dev@rainsaver.local (see cmd/devseed).
-  auth-devseed:
-    build: {context: .build, args: {BIN: devseed}}
-    command: ["-dev"]
-    environment:
-      <<: *auth-db-env
-      DEVSEED_EMAIL: ${DEVSEED_EMAIL:-dev@rainsaver.local}
-      DEVSEED_PASSWORD: ${DEVSEED_PASSWORD:-rainsaver-dev-pass}
-    depends_on:
-      auth-migrate: {condition: service_completed_successfully}
-
-  auth:
-    build: {context: .build, args: {BIN: auth-service}}
-    environment:
-      <<: *auth-db-env
-      PORT: "8080"
-      # Named volume: the signing key survives restarts, so tokens (and
-      # rain-saver's cached JWKS) stay valid across `docker compose restart`.
-      AUTH_PRIVATE_KEY_PATH: /app/keys/private_key.pem
-      AUTH_KEY_ID: local-1
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
-      # Browser origins allowed to call the API (comma-separated). Default:
-      # the front-end's Vite dev server.
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
-    volumes:
-      - auth_keys:/app/keys
-    ports:
-      - "${AUTH_PORT:-8080}:8080"
-    healthcheck:
-      # No dedicated health endpoint: JWKS answering means the key is loaded
-      # and the HTTP server is up.
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/.well-known/jwks.json >/dev/null"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-    depends_on:
-      auth-migrate: {condition: service_completed_successfully}
-      auth-devseed: {condition: service_completed_successfully}
-
   rain-saver:
     build: {context: .build, args: {BIN: rain-saver}}
     environment:
@@ -122,7 +54,9 @@ services:
       POSTGRES_USER: rainsaver
       POSTGRES_PASSWORD: rainsaver
       POSTGRES_DB: rainsaver
-      AUTH_SERVICE_BASE_URL: http://auth:8080
+      # go-auth-service on Azure (docs/DEPLOY_AZURE.md in that repo).
+      AUTH_SERVICE_BASE_URL: ${AUTH_SERVICE_BASE_URL:-https://ca-auth.lemonmoss-8726f7e4.northcentralus.azurecontainerapps.io}
+      AUTH_ISSUER: ${AUTH_ISSUER:-https://ca-auth.lemonmoss-8726f7e4.northcentralus.azurecontainerapps.io}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
       GEOCODER_URL: ${GEOCODER_URL:-https://nominatim.openstreetmap.org}
       GEOCODER_USER_AGENT: ${GEOCODER_USER_AGENT:-rain-saver-local-dev (+https://github.com/Davi-OS/rain-saver)}
@@ -137,12 +71,8 @@ services:
       timeout: 3s
       retries: 30
     depends_on:
-      # rain-saver fetches JWKS at boot and exits if auth is unreachable.
-      auth: {condition: service_healthy}
       rs-migrate: {condition: service_completed_successfully}
       rs-stations: {condition: service_completed_successfully}
 
 volumes:
-  auth_db:
   rs_db:
-  auth_keys:

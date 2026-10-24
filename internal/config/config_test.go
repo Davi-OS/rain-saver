@@ -26,12 +26,16 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.AuthServiceBaseURL != "http://localhost:8080" {
 		t.Errorf("AuthServiceBaseURL = %q, want http://localhost:8080", cfg.AuthServiceBaseURL)
 	}
+	if cfg.AuthIssuer != "" {
+		t.Errorf("AuthIssuer = %q, want empty (SDK default)", cfg.AuthIssuer)
+	}
 }
 
 func TestLoadEnvOverridesDefaults(t *testing.T) {
 	t.Setenv("PORT", "9090")
 	t.Setenv("POSTGRES_HOST", "db.internal")
 	t.Setenv("AUTH_SERVICE_BASE_URL", "https://auth.internal")
+	t.Setenv("AUTH_ISSUER", "https://auth.internal")
 
 	cfg := Load()
 
@@ -43,6 +47,9 @@ func TestLoadEnvOverridesDefaults(t *testing.T) {
 	}
 	if cfg.AuthServiceBaseURL != "https://auth.internal" {
 		t.Errorf("AuthServiceBaseURL = %q, want https://auth.internal", cfg.AuthServiceBaseURL)
+	}
+	if cfg.AuthIssuer != "https://auth.internal" {
+		t.Errorf("AuthIssuer = %q, want https://auth.internal", cfg.AuthIssuer)
 	}
 }
 

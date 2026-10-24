@@ -19,6 +19,9 @@ type Config struct {
 	PostgresDB       string
 
 	AuthServiceBaseURL string
+	// AuthIssuer must equal the auth service's AUTH_ISSUER (the "iss" of
+	// its tokens). Empty uses the SDK default, "auth-service".
+	AuthIssuer string
 
 	// GeocoderURL is the Nominatim instance used to locate addresses sent
 	// without coordinates; GeocoderUserAgent identifies this app to it, as
@@ -49,6 +52,7 @@ func Load() *Config {
 		PostgresDB:       envOrDefault("POSTGRES_DB", "rainsaver"),
 
 		AuthServiceBaseURL: envOrDefault("AUTH_SERVICE_BASE_URL", "http://localhost:8080"),
+		AuthIssuer:         os.Getenv("AUTH_ISSUER"),
 
 		GeocoderURL:       envOrDefault("GEOCODER_URL", "https://nominatim.openstreetmap.org"),
 		GeocoderUserAgent: envOrDefault("GEOCODER_USER_AGENT", "rain-saver (+https://github.com/Davi-OS/rain-saver)"),

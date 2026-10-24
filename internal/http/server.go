@@ -32,8 +32,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.router.ServeHTTP(w, r)
 }
 
-// Permissions of the rain-saver system in go-auth-service (catalog
-// registered by go-auth-service's cmd/devseed for dev/local).
+// Permissions of the rain-saver system in go-auth-service (catalog in
+// deploy/auth-system.json, registered with POST /systems).
 const (
 	PermEnderecoRead     = "endereco:read"
 	PermEnderecoWrite    = "endereco:write"

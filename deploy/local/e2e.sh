@@ -1,26 +1,47 @@
 #!/usr/bin/env bash
-# End-to-end checks of go-auth-service <-> rain-saver on the local stack
-# (docker-compose.yml in this directory). Needs curl and jq.
+# End-to-end checks of rain-saver (local stack, docker-compose.yml in this
+# directory) against the go-auth-service deployed on Azure. Needs curl and jq.
 #
-#   ./build.sh && docker compose up --build -d && ./e2e.sh
+#   ./build.sh && docker compose up --build -d
+#   E2E_ADMIN_EMAIL=... E2E_ADMIN_PASSWORD=... E2E_USER_PASSWORD=... ./e2e.sh
 #
-# Idempotent: can be re-run against the same stack.
+# E2E_ADMIN_* is an admin of the rain-saver system (see deploy/auth-system.json
+# and the README). The script works inside a test tenant ("E2E", created on
+# the first run) and creates the test accounts maria and semacesso there,
+# with E2E_USER_PASSWORD as their final password. Credentials only come from
+# the environment, since these accounts live in production.
+#
+# Idempotent: can be re-run against the same stack and tenant.
 set -uo pipefail
 
-AUTH=${AUTH_URL:-http://localhost:8080}
+AUTH=${AUTH_URL:-https://ca-auth.lemonmoss-8726f7e4.northcentralus.azurecontainerapps.io}
+AUTH_ISSUER=${AUTH_ISSUER:-$AUTH}
 RS=${RAIN_SAVER_URL:-http://localhost:8081}
-DEV_EMAIL=${DEVSEED_EMAIL:-dev@rainsaver.local}
-DEV_PASS=${DEVSEED_PASSWORD:-rainsaver-dev-pass}
+ADMIN_EMAIL=${E2E_ADMIN_EMAIL:-}
+ADMIN_PASS=${E2E_ADMIN_PASSWORD:-}
+USER_PASS=${E2E_USER_PASSWORD:-}
+TENANT_NAME=${E2E_TENANT_NAME:-E2E}
 NOACCESS_EMAIL=semacesso@rainsaver.local
-NOACCESS_PASS=sem-acesso-123
 MARIA_EMAIL=maria@rainsaver.local
-MARIA_PASS=maria-pass-123
+# Password set by the admin when creating an account; the account must change
+# it on first login (password_change_required).
+TEMP_PASS=e2e-temporary-pass
 # Revocations reach rain-saver via polling (SDK default: every 5s).
 REVOCATION_WAIT_SECS=${REVOCATION_WAIT_SECS:-10}
-# Front-end origin expected in CORS_ALLOWED_ORIGINS (Vite dev server).
+# Front-end origins: the auth allows the system's web_origins
+# (deploy/auth-system.json); rain-saver allows CORS_ALLOWED_ORIGINS.
+AUTH_FRONT_ORIGIN=${AUTH_FRONT_ORIGIN:-https://davi-os.github.io}
 FRONT_ORIGIN=${FRONT_ORIGIN:-http://localhost:5173}
 
-here="$(cd "$(dirname "$0")" && pwd)"
+if [[ -z $ADMIN_EMAIL || -z $ADMIN_PASS || -z $USER_PASS ]]; then
+  echo "set E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD and E2E_USER_PASSWORD" >&2
+  exit 2
+fi
+if [[ $USER_PASS == "$TEMP_PASS" ]]; then
+  echo "E2E_USER_PASSWORD must differ from the temporary password" >&2
+  exit 2
+fi
+
 pass=0
 fail=0
 
@@ -64,11 +85,38 @@ claims() { # decode a JWT payload
 }
 
 login() { # login EMAIL PASS SYSTEM [ORG] -> sets $access $refresh
-  local org_field=""
-  [[ -n ${4:-} ]] && org_field=",\"org\":\"$4\""
-  req POST "$AUTH/login" "" "{\"email\":\"$1\",\"password\":\"$2\",\"system\":\"$3\"$org_field}"
+  req POST "$AUTH/login" "" "$(jq -nc --arg e "$1" --arg p "$2" --arg s "$3" --arg o "${4:-}" \
+    '{email: $e, password: $p, system: $s} + (if $o == "" then {} else {org: $o} end)')"
   access=$(jq -r '.access_token // empty' <<<"$body")
   refresh=$(jq -r '.refresh_token // empty' <<<"$body")
+}
+
+login_in_org() { # login_in_org EMAIL PASS SYSTEM ORG_SLUG -> like login, picking ORG_SLUG on 409 org_required
+  login "$1" "$2" "$3"
+  if [[ $status == 409 ]]; then
+    local id
+    id=$(jq -r --arg s "$4" '.orgs[]? | select(.slug == $s) | .id' <<<"$body")
+    [[ -n $id ]] && login "$1" "$2" "$3" "$id"
+  fi
+}
+
+change_temp_password() { # change_temp_password EMAIL -> TEMP_PASS becomes USER_PASS
+  req POST "$AUTH/password/change" "" "$(jq -nc --arg e "$1" --arg c "$TEMP_PASS" --arg n "$USER_PASS" \
+    '{email: $e, current_password: $c, new_password: $n}')"
+}
+
+ensure_user() { # ensure_user EMAIL SYSTEM -> creates EMAIL in the tenant (SYSTEM "" = auth only) and completes the forced password change
+  req POST "$AUTH/orgs/$tenant/users" "$admin_access" "$(jq -nc --arg e "$1" --arg p "$TEMP_PASS" --arg s "$2" \
+    '{email: $e, password: $p, role: "member"} + (if $s == "" then {} else {system: $s} end)')"
+  if [[ $status == 409 ]]; then
+    echo "  skip $1 already exists (re-run)"
+    change_temp_password "$1" # finishes a change an interrupted run left pending; 401 once done
+    return
+  fi
+  check "owner creates $1" 201
+  login "$1" "$TEMP_PASS" auth; check "$1 first login -> 403" 403
+  assert "...with error password_change_required" test "$(jq -r .error <<<"$body")" = password_change_required
+  change_temp_password "$1"; check "$1 changes the temporary password" 204
 }
 
 wait_for_status() { # wait_for_status URL TOKEN EXPECTED -> polls until match or timeout
@@ -81,51 +129,57 @@ wait_for_status() { # wait_for_status URL TOKEN EXPECTED -> polls until match or
   return 1
 }
 
-echo "== health"
+echo "== health ($AUTH)"
+req GET "$AUTH/healthz"; check "auth /healthz" 200
 req GET "$AUTH/.well-known/jwks.json"; check "auth JWKS" 200
 req GET "$RS/healthz"; check "rain-saver /healthz" 200
 
-echo "== CORS for the front-end ($FRONT_ORIGIN)"
+echo "== CORS for the front-end"
 preflight() { # preflight URL ORIGIN METHOD -> prints the Access-Control-Allow-Origin value
   curl -s -o /dev/null -D - -X OPTIONS "$1" -H "Origin: $2" \
     -H "Access-Control-Request-Method: $3" -H 'Access-Control-Request-Headers: authorization,content-type' |
     tr -d '\r' | awk -F': ' 'tolower($1) == "access-control-allow-origin" {print $2}'
 }
-assert "auth preflight POST /login allows the front" test "$(preflight "$AUTH/login" "$FRONT_ORIGIN" POST)" = "$FRONT_ORIGIN"
+assert "auth preflight POST /login allows $AUTH_FRONT_ORIGIN" test "$(preflight "$AUTH/login" "$AUTH_FRONT_ORIGIN" POST)" = "$AUTH_FRONT_ORIGIN"
 assert "rain-saver preflight POST /enderecos allows the front" test "$(preflight "$RS/enderecos" "$FRONT_ORIGIN" POST)" = "$FRONT_ORIGIN"
 assert "rain-saver preflight refuses other origins" test -z "$(preflight "$RS/enderecos" https://evil.example POST)"
 acao=$(curl -s -o /dev/null -D - "$RS/enderecos" -H "Origin: $FRONT_ORIGIN" | tr -d '\r' | awk -F': ' 'tolower($1) == "access-control-allow-origin" {print $2}')
 assert "rain-saver 401 still carries CORS headers (front can read the error)" test "$acao" = "$FRONT_ORIGIN"
 
+echo "== test tenant ($TENANT_NAME)"
+login_in_org "$ADMIN_EMAIL" "$ADMIN_PASS" auth rain-saver; check "admin logs in for auth in the rain-saver owner org" 200
+owner_access=$access
+req GET "$AUTH/systems/rain-saver/orgs" "$owner_access"; check "admin lists rain-saver tenants" 200
+tenant=$(jq -r --arg n "$TENANT_NAME" '[.orgs[] | select(.name == $n)][0].id // empty' <<<"$body")
+if [[ -z $tenant ]]; then
+  req POST "$AUTH/systems/rain-saver/orgs" "$owner_access" \
+    "$(jq -nc --arg n "$TENANT_NAME" --arg e "$ADMIN_EMAIL" '{name: $n, owner_email: $e}')"
+  check "admin creates the test tenant (owner: admin)" 201
+  tenant=$(jq -r '.org.id // empty' <<<"$body")
+fi
+assert "tenant id known" test -n "$tenant"
+login "$ADMIN_EMAIL" "$ADMIN_PASS" auth "$tenant"; check "admin logs in for auth in the tenant (admin API)" 200
+admin_access=$access
+
 echo "== login (rain-saver audience)"
-login "$DEV_EMAIL" "$DEV_PASS" rain-saver; check "dev logs in for rain-saver" 200
+login "$ADMIN_EMAIL" "$ADMIN_PASS" rain-saver "$tenant"; check "admin logs in for rain-saver in the tenant" 200
 dev_access=$access; dev_refresh=$refresh
 c=$(claims "$dev_access")
-org=$(jq -r .org <<<"$c")
-assert "iss = auth-service" test "$(jq -r .iss <<<"$c")" = auth-service
+assert "iss = $AUTH_ISSUER" test "$(jq -r .iss <<<"$c")" = "$AUTH_ISSUER"
 assert "aud = [rain-saver]" test "$(jq -c .aud <<<"$c")" = '["rain-saver"]'
-assert "org claim present" test -n "$org" -a "$org" != null
+assert "org claim = tenant" test "$(jq -r .org <<<"$c")" = "$tenant"
 assert "perms carry endereco:write" jqok '.perms | index("endereco:write")' <<<"$c"
 req GET "$AUTH/me" "$dev_access"; check "/me accepts a rain-saver token" 200
 
-echo "== user management (admin creates user, no Google)"
-login "$DEV_EMAIL" "$DEV_PASS" auth "$org"; check "dev logs in for auth (admin API)" 200
-admin_access=$access
-req POST "$AUTH/orgs/$org/users" "$admin_access" \
-  "{\"email\":\"$MARIA_EMAIL\",\"password\":\"$MARIA_PASS\",\"role\":\"member\",\"system\":\"rain-saver\"}"
-if [[ $status == 409 ]]; then status=201; fi # re-run: already created
-check "owner creates maria (rain-saver member)" 201
-login "$MARIA_EMAIL" "$MARIA_PASS" rain-saver; check "maria logs in for rain-saver" 200
+echo "== user management (admin creates users, forced password change)"
+ensure_user "$MARIA_EMAIL" rain-saver
+login "$MARIA_EMAIL" "$USER_PASS" rain-saver; check "maria logs in for rain-saver" 200
 maria_access=$access
 assert "maria's token has role member" test "$(claims "$maria_access" | jq -c .roles)" = '["member"]'
-
-req POST "$AUTH/orgs/$org/users" "$admin_access" \
-  "{\"email\":\"$NOACCESS_EMAIL\",\"password\":\"$NOACCESS_PASS\",\"role\":\"member\"}" # auth-only member
-if [[ $status == 409 ]]; then status=201; fi
-check "owner creates an account with no rain-saver role" 201
+ensure_user "$NOACCESS_EMAIL" "" # auth-only member
 
 echo "== permissions"
-login "$NOACCESS_EMAIL" "$NOACCESS_PASS" rain-saver; check "account without rain-saver role still gets a token" 200
+login "$NOACCESS_EMAIL" "$USER_PASS" rain-saver; check "account without rain-saver role still gets a token" 200
 assert "...but it carries no org and no perms" test "$(claims "$access" | jq -c '[.org, (.perms // [] | length)]')" = '[null,0]'
 req GET "$RS/enderecos" "$access"; check "rain-saver rejects it on reads (403)" 403
 req POST "$RS/enderecos" "$access" '{"logradouro":"X","number":"1","latitude":0,"longitude":0}'; check "rain-saver rejects it on writes (403)" 403
@@ -196,18 +250,8 @@ sleep 1 # keep the new login below in a later second than the cutoff (JWT iat ha
 req POST "$AUTH/logout-all" "$maria_access" '{"system":"rain-saver"}'; check "maria logout-all" 204
 assert "maria's old token rejected by rain-saver within ${REVOCATION_WAIT_SECS}s" wait_for_status "$RS/enderecos" "$maria_access" 401
 sleep 1
-login "$MARIA_EMAIL" "$MARIA_PASS" rain-saver; check "maria logs in again" 200
+login "$MARIA_EMAIL" "$USER_PASS" rain-saver; check "maria logs in again" 200
 req GET "$RS/enderecos" "$access"; check "maria's new token works" 200
-
-echo "== auth restart keeps tokens valid (stable signing key volume)"
-login "$DEV_EMAIL" "$DEV_PASS" rain-saver
-before_restart=$access
-(cd "$here" && docker compose restart auth >/dev/null 2>&1)
-deadline=$((SECONDS + 30))
-until curl -sf "$AUTH/.well-known/jwks.json" >/dev/null || (( SECONDS > deadline )); do sleep 0.5; done
-req GET "$RS/enderecos" "$before_restart"; check "pre-restart token still accepted by rain-saver" 200
-login "$DEV_EMAIL" "$DEV_PASS" rain-saver; check "login after restart" 200
-req GET "$RS/enderecos" "$access"; check "post-restart token accepted by rain-saver" 200
 
 echo
 echo "passed: $pass  failed: $fail"

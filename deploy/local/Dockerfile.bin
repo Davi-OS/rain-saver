@@ -4,9 +4,7 @@
 FROM alpine:3.20
 
 ARG BIN
-RUN adduser -D -u 10001 appuser \
-    && mkdir -p /app/keys \
-    && chown -R appuser:appuser /app
+RUN adduser -D -u 10001 appuser
 
 WORKDIR /app
 COPY bin/${BIN} /app/app

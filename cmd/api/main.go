@@ -32,6 +32,7 @@ func main() {
 	authClient, err := authsdk.New(ctx, authsdk.Config{
 		BaseURL:  cfg.AuthServiceBaseURL,
 		Audience: "rain-saver",
+		Issuer:   cfg.AuthIssuer,
 	})
 	if err != nil {
 		log.Fatalf("connect to auth service: %v", err)

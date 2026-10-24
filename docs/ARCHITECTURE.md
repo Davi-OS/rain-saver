@@ -291,9 +291,9 @@ ALTER TABLE pluvial_economy
 
 ## Integração de autenticação
 
-1. `authsdk.Client` é construído no boot com `Audience: "rain-saver"`. Ele busca o JWKS do go-auth-service, monta um verificador local (issuer + chaves), faz um fetch inicial de `/revocations` e inicia um polling em background (padrão 5s) que mantém dois mapas em memória: `jti` revogados e `userInvalidAfter` (invalidação "sair de todos os lugares").
+1. `authsdk.Client` é construído no boot com `Audience: "rain-saver"` e `Issuer: AUTH_ISSUER`. Ele busca o JWKS do go-auth-service, monta um verificador local (issuer + chaves), faz um fetch inicial de `/revocations` e inicia um polling em background (padrão 5s) que mantém dois mapas em memória: `jti` revogados e `userInvalidAfter` (invalidação "sair de todos os lugares").
 2. `RequireAuth` (middleware Gin, `internal/http/middleware.go`): extrai `Authorization: Bearer <token>`, chama `client.Verify(token)` — que valida assinatura ES256, issuer, **audience exatamente `"rain-saver"`** (exige um registro `systems.slug = 'rain-saver'` no banco do go-auth-service), expiração, e por fim a revogação local (cache de polling). Falha → 401 `{"error":"unauthorized: <erro>"}`.
-3. `RequirePermission(perm)` (após `RequireAuth`) exige o permission string no claim `perms` → 403 `{"error":"forbidden: missing permission <perm>"}`. O catálogo (`endereco:read`, `endereco:write`, `pluvial:calculate`) é registrado no go-auth-service (em dev, pelo `cmd/devseed`).
+3. `RequirePermission(perm)` (após `RequireAuth`) exige o permission string no claim `perms` → 403 `{"error":"forbidden: missing permission <perm>"}`. O catálogo (`endereco:read`, `endereco:write`, `pluvial:calculate`) fica em `deploy/auth-system.json` e é registrado no go-auth-service com `POST /systems` (veja o README).
 4. **`user_id` nunca vem do body** — sempre extraído de `claims.Subject` (`sub` do JWT) via `UserIDFromContext`, e é essa a única fonte de verdade para ownership em todos os handlers/services.
 5. rain-saver não guarda nenhuma chave/segredo de JWT localmente — a confiança é inteiramente delegada às chaves públicas do go-auth-service, buscadas no boot.
 
@@ -308,7 +308,8 @@ ALTER TABLE pluvial_economy
 | `POSTGRES_USER` | `rainsaver` |
 | `POSTGRES_PASSWORD` | `rainsaver` |
 | `POSTGRES_DB` | `rainsaver` |
-| `AUTH_SERVICE_BASE_URL` | `http://localhost:8080` |
+| `AUTH_SERVICE_BASE_URL` | `http://localhost:8080` (o `.env.example` aponta para o auth na Azure) |
+| `AUTH_ISSUER` | `""` (usa o default do SDK, `auth-service`); deve ser igual ao `AUTH_ISSUER` do auth, que na Azure é a URL dele |
 | `CORS_ALLOWED_ORIGINS` | `""` (CORS desligado); lista separada por vírgula, ex. `http://localhost:5173` |
 | `GEOCODER_URL` | `https://nominatim.openstreetmap.org` |
 | `GEOCODER_USER_AGENT` | `rain-saver (+https://github.com/Davi-OS/rain-saver)` — obrigatório pela política do Nominatim |
