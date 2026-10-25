@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,40 +14,16 @@ import (
 	"github.com/gin-gonic/gin"
 	jwtlib "github.com/golang-jwt/jwt/v5"
 
-	"github.com/Davi-OS/go-auth-service/pkg/authsdk"
+	"github.com/Davi-OS/go-auth-sdk/authsdk"
+	"github.com/Davi-OS/go-auth-sdk/token"
 	rainhttp "github.com/Davi-OS/rain-saver/internal/http"
 )
 
-// This test cannot import go-auth-service's internal/jwt package (Go's
-// internal-package visibility rule forbids it from outside that module),
-// so it builds a wire-compatible fake JWKS server and signs tokens itself
-// with golang-jwt/jwt/v5 directly, matching the JWK field names and ES256
-// signing scheme documented in go-auth-service's internal/jwt/{jwks,sign}.go.
-
-type fakeJWK struct {
-	Kty string `json:"kty"`
-	Crv string `json:"crv"`
-	X   string `json:"x"`
-	Y   string `json:"y"`
-	Use string `json:"use"`
-	Kid string `json:"kid"`
-	Alg string `json:"alg"`
-}
-
-type fakeJWKS struct {
-	Keys []fakeJWK `json:"keys"`
-}
-
+// A fake auth server: the JWKS of the test key and an empty revocation
+// delta, the two endpoints authsdk.New needs. Tokens are signed in signToken
+// the way go-auth-service signs them.
 func newFakeAuthServer(kid string, pub *ecdsa.PublicKey) *httptest.Server {
-	size := (pub.Curve.Params().BitSize + 7) / 8
-	x := pub.X.FillBytes(make([]byte, size))
-	y := pub.Y.FillBytes(make([]byte, size))
-	jwks := fakeJWKS{Keys: []fakeJWK{{
-		Kty: "EC", Crv: "P-256",
-		X:   base64.RawURLEncoding.EncodeToString(x),
-		Y:   base64.RawURLEncoding.EncodeToString(y),
-		Use: "sig", Kid: kid, Alg: "ES256",
-	}}}
+	jwks := token.JWKS{Keys: []token.JWK{token.PublicKeyToJWK(kid, pub)}}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
@@ -68,15 +43,15 @@ func signToken(t *testing.T, priv *ecdsa.PrivateKey, kid, subject, audience stri
 		RegisteredClaims: jwtlib.RegisteredClaims{
 			Subject:   subject,
 			Audience:  jwtlib.ClaimStrings{audience},
-			Issuer:    "auth-service",
+			Issuer:    token.DefaultIssuer,
 			IssuedAt:  jwtlib.NewNumericDate(now),
 			ExpiresAt: jwtlib.NewNumericDate(now.Add(time.Minute)),
 			ID:        "test-jti",
 		},
 	}
-	token := jwtlib.NewWithClaims(jwtlib.SigningMethodES256, claims)
-	token.Header["kid"] = kid
-	signed, err := token.SignedString(priv)
+	tok := jwtlib.NewWithClaims(jwtlib.SigningMethodES256, claims)
+	tok.Header["kid"] = kid
+	signed, err := tok.SignedString(priv)
 	if err != nil {
 		t.Fatalf("sign token: %v", err)
 	}

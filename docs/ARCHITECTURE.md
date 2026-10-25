@@ -26,7 +26,7 @@ scripts/seed_dev_stations.sql  (fixture de dev, NÃO é migration)
 
 | Módulo | Propósito |
 |---|---|
-| `github.com/Davi-OS/go-auth-service` | SDK (`pkg/authsdk`) para validar JWTs emitidos pelo go-auth-service |
+| `github.com/Davi-OS/go-auth-sdk` | SDK público (`authsdk`, `token`) para validar JWTs emitidos pelo go-auth-service |
 | `github.com/gin-gonic/gin` | Router/framework HTTP |
 | `github.com/golang-jwt/jwt/v5` | Primitivas de JWT (usado nos testes para forjar tokens; usado transitivamente pelo authsdk) |
 | `github.com/jackc/pgx/v5` | Driver/pool Postgres |
@@ -316,10 +316,7 @@ ALTER TABLE pluvial_economy
 
 ## Build & Deploy
 
-- **Dockerfile** (multi-stage): builder `golang:1.25-alpine` com `GOPRIVATE=github.com/Davi-OS/*` (módulo `go-auth-service` é privado); `go mod download` usa um **secret do BuildKit montado como netrc** (`--mount=type=secret,id=netrc,...`) para nunca gravar credenciais git na imagem:
-  ```
-  docker build --secret id=netrc,src=$HOME/.netrc -t rain-saver .
-  ```
+- **Dockerfile** (multi-stage): builder `golang:1.25-alpine`; todas as dependências são públicas, então `docker build -t rain-saver .` não precisa de credencial.
   Runtime: `alpine:3.20`, usuário não-root `appuser` (uid 10001), `EXPOSE 8081`.
 - **docker-compose.yml**: só o serviço `postgres` (a API roda via `go run`/binário, fora do compose), porta `5433:5432`.
 - **CI/CD**: não existe `.github/workflows` neste repositório — nenhuma pipeline configurada até o momento.
@@ -328,11 +325,11 @@ ALTER TABLE pluvial_economy
 
 - `go test ./...`. Testes de repositório contra Postgres real usam `testutil_test.go`: pool via `TEST_DATABASE_URL`, sem default (antes caía no banco de dev): **skip** se a variável não estiver definida ou o banco não estiver acessível, e **falha** se o nome do banco não terminar em `_test`; usa um **advisory lock** (`573_918_264`, escolhido para não colidir com o `918_273_645` do go-auth-service) para serializar os testes contra um banco compartilhado, e faz `TRUNCATE ... RESTART IDENTITY CASCADE` antes de cada rodada.
 - Testes de service usam fakes em memória (`internal/service/fakes_test.go`) — sem necessidade de banco.
-- `internal/http/middleware_test.go` sobe um **servidor JWKS/revocations fake** (`httptest`), assina tokens ES256 com `golang-jwt/jwt/v5` compatíveis com o esquema do go-auth-service, e testa `RequireAuth` fim a fim.
+- `internal/http/middleware_test.go` sobe um **servidor JWKS/revocations fake** (`httptest`), serve o JWKS com os tipos de `go-auth-sdk/token`, assina tokens ES256 com `golang-jwt/jwt/v5` como o go-auth-service, e testa `RequireAuth` fim a fim.
 
 ## Setup local (resumo do README)
 
-1. `export GOPRIVATE=github.com/Davi-OS/*` e garantir acesso git ao `go-auth-service` privado.
+1. Nenhuma credencial: as dependências são públicas.
 2. Copiar `.env.example` → `.env`.
 3. `docker compose up -d postgres`; rodar as migrations com `golang-migrate`.
 4. Popular dados de estação: `psql ... -f scripts/seed_dev_stations.sql`.

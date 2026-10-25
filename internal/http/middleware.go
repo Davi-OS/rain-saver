@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/Davi-OS/go-auth-service/pkg/authsdk"
+	"github.com/Davi-OS/go-auth-sdk/authsdk"
 )
 
 const claimsContextKey = "rainsaver_claims"
