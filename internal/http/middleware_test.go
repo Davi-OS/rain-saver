@@ -60,10 +60,11 @@ func newFakeAuthServer(kid string, pub *ecdsa.PublicKey) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
-func signToken(t *testing.T, priv *ecdsa.PrivateKey, kid, subject, audience string) string {
+func signToken(t *testing.T, priv *ecdsa.PrivateKey, kid, subject, audience string, perms ...string) string {
 	t.Helper()
 	now := time.Now()
 	claims := authsdk.Claims{
+		Permissions: perms,
 		RegisteredClaims: jwtlib.RegisteredClaims{
 			Subject:   subject,
 			Audience:  jwtlib.ClaimStrings{audience},
@@ -88,6 +89,9 @@ func newTestRouter(client *authsdk.Client) http.Handler {
 	r.GET("/protected", rainhttp.RequireAuth(client), func(c *gin.Context) {
 		userID, _ := rainhttp.UserIDFromContext(c)
 		c.JSON(http.StatusOK, gin.H{"user_id": userID})
+	})
+	r.GET("/needs-write", rainhttp.RequireAuth(client), rainhttp.RequirePermission(rainhttp.PermEnderecoWrite), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
 	})
 	return r
 }
@@ -169,4 +173,43 @@ func TestRequireAuth(t *testing.T) {
 			t.Errorf("user_id = %q, want user-1", body["user_id"])
 		}
 	})
+}
+
+func TestRequirePermission(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	const kid = "test-key"
+	fake := newFakeAuthServer(kid, &priv.PublicKey)
+	defer fake.Close()
+	client, err := authsdk.New(context.Background(), authsdk.Config{BaseURL: fake.URL, Audience: "rain-saver", PollInterval: time.Second})
+	if err != nil {
+		t.Fatalf("authsdk.New: %v", err)
+	}
+	defer client.Close()
+	ts := httptest.NewServer(newTestRouter(client))
+	defer ts.Close()
+
+	tests := []struct {
+		name   string
+		perms  []string
+		status int
+	}{
+		{"no permissions (account without access to rain-saver)", nil, http.StatusForbidden},
+		{"other permissions only", []string{rainhttp.PermEnderecoRead}, http.StatusForbidden},
+		{"required permission", []string{rainhttp.PermEnderecoRead, rainhttp.PermEnderecoWrite}, http.StatusNoContent},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := doWithBearer(ts.URL+"/needs-write", signToken(t, priv, kid, "user-1", "rain-saver", tt.perms...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != tt.status {
+				t.Errorf("status = %d, want %d", resp.StatusCode, tt.status)
+			}
+		})
+	}
 }

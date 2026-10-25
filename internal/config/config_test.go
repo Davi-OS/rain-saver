@@ -26,12 +26,16 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.AuthServiceBaseURL != "http://localhost:8080" {
 		t.Errorf("AuthServiceBaseURL = %q, want http://localhost:8080", cfg.AuthServiceBaseURL)
 	}
+	if cfg.AuthIssuer != "" {
+		t.Errorf("AuthIssuer = %q, want empty (SDK default)", cfg.AuthIssuer)
+	}
 }
 
 func TestLoadEnvOverridesDefaults(t *testing.T) {
 	t.Setenv("PORT", "9090")
 	t.Setenv("POSTGRES_HOST", "db.internal")
 	t.Setenv("AUTH_SERVICE_BASE_URL", "https://auth.internal")
+	t.Setenv("AUTH_ISSUER", "https://auth.internal")
 
 	cfg := Load()
 
@@ -43,6 +47,9 @@ func TestLoadEnvOverridesDefaults(t *testing.T) {
 	}
 	if cfg.AuthServiceBaseURL != "https://auth.internal" {
 		t.Errorf("AuthServiceBaseURL = %q, want https://auth.internal", cfg.AuthServiceBaseURL)
+	}
+	if cfg.AuthIssuer != "https://auth.internal" {
+		t.Errorf("AuthIssuer = %q, want https://auth.internal", cfg.AuthIssuer)
 	}
 }
 
@@ -71,5 +78,18 @@ func TestAddr(t *testing.T) {
 	cfg := &Config{Port: "8081"}
 	if got := cfg.Addr(); got != ":8081" {
 		t.Errorf("Addr() = %q, want :8081", got)
+	}
+}
+
+func TestCORSAllowedOrigins(t *testing.T) {
+	t.Setenv("CORS_ALLOWED_ORIGINS", " http://localhost:5173 , ,https://davi-os.github.io")
+	got := Load().CORSAllowedOrigins
+	if len(got) != 2 || got[0] != "http://localhost:5173" || got[1] != "https://davi-os.github.io" {
+		t.Errorf("CORSAllowedOrigins = %q", got)
+	}
+
+	t.Setenv("CORS_ALLOWED_ORIGINS", "")
+	if got := Load().CORSAllowedOrigins; len(got) != 0 {
+		t.Errorf("empty env: CORSAllowedOrigins = %q, want none", got)
 	}
 }

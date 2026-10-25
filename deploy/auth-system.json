@@ -1,0 +1,11 @@
+{
+  "name": "Rain Saver",
+  "slug": "rain-saver",
+  "permissions": ["endereco:read", "endereco:write", "pluvial:calculate"],
+  "roles": {
+    "owner": ["endereco:read", "endereco:write", "pluvial:calculate"],
+    "member": ["endereco:read", "endereco:write", "pluvial:calculate"]
+  },
+  "admin_role": "owner",
+  "web_origins": ["https://davi-os.github.io"]
+}

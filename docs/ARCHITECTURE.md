@@ -115,33 +115,36 @@ Não existe struct `User`: identidade vive inteiramente no go-auth-service; `end
 
 ## Endpoints HTTP
 
-Middleware global: `gin.Recovery()` + limite de 1MB no corpo da requisição. Todas as rotas exceto `/openapi.yaml`, `/docs` e `/healthz` exigem `RequireAuth`.
+Middleware global: `gin.Recovery()`, CORS (`CORS_ALLOWED_ORIGINS`) + limite de 1MB no corpo da requisição. Todas as rotas exceto `/openapi.yaml`, `/docs` e `/healthz` exigem `RequireAuth` **e** uma permissão do sistema `rain-saver` (`RequirePermission`, 403 sem ela).
 
-| Método | Rota | Auth | Descrição |
+| Método | Rota | Permissão | Descrição |
 |---|---|---|---|
-| GET | `/openapi.yaml` | não | Spec OpenAPI 3.0.3 embutida no binário |
-| GET | `/docs` | não | Swagger UI apontando para `/openapi.yaml` |
-| GET | `/healthz` | não | `{"status":"ok"}` |
-| POST | `/enderecos` | sim | Cria endereço do usuário autenticado |
-| GET | `/enderecos` | sim | Lista endereços do usuário autenticado |
-| GET | `/enderecos/:id` | sim | Busca um endereço (ownership obrigatório) |
-| DELETE | `/enderecos/:id` | sim | Remove um endereço (ownership obrigatório) |
-| POST | `/enderecos/:id/pluvial-economy` | sim | Calcula e persiste uma nova economia pluvial |
-| GET | `/enderecos/:id/pluvial-economy` | sim | Retorna o cálculo mais recente para o endereço |
+| GET | `/openapi.yaml` | — (público) | Spec OpenAPI 3.0.3 embutida no binário |
+| GET | `/docs` | — (público) | Swagger UI apontando para `/openapi.yaml` |
+| GET | `/healthz` | — (público) | `{"status":"ok"}` |
+| POST | `/enderecos` | `endereco:write` | Cria endereço do usuário autenticado (geocodifica se faltar lat/lng) |
+| GET | `/enderecos` | `endereco:read` | Lista endereços do usuário autenticado |
+| GET | `/enderecos/:id` | `endereco:read` | Busca um endereço (ownership obrigatório) |
+| DELETE | `/enderecos/:id` | `endereco:write` | Remove um endereço (ownership obrigatório) |
+| POST | `/enderecos/:id/pluvial-economy` | `pluvial:calculate` | Calcula e persiste uma nova economia pluvial |
+| GET | `/enderecos/:id/pluvial-economy` | `endereco:read` | Retorna o cálculo mais recente para o endereço |
+
+Contas sem acesso ao rain-saver (sem organização habilitada para o sistema) recebem tokens sem `org` e **sem permissões**, então `RequirePermission` também as barra. Os dados continuam escopados por usuário (`sub`); o claim `org` ainda não é usado para escopo.
 
 **POST /enderecos** — request:
 ```go
 type enderecoCreateRequest struct {
-	Logradouro string  `json:"logradouro" binding:"required"`
-	Number     string  `json:"number" binding:"required"`
-	Cep        string  `json:"cep"`
-	Latitude   float64 `json:"latitude" binding:"required"`
-	Longitude  float64 `json:"longitude" binding:"required"`
-	Cidade     string  `json:"cidade"`
-	Estado     string  `json:"estado"`
+	Logradouro string   `json:"logradouro" binding:"required"`
+	Number     string   `json:"number" binding:"required"`
+	Bairro     string   `json:"bairro"`
+	Cep        string   `json:"cep"`
+	Latitude   *float64 `json:"latitude" binding:"omitempty,gte=-90,lte=90"`
+	Longitude  *float64 `json:"longitude" binding:"omitempty,gte=-180,lte=180"`
+	Cidade     string   `json:"cidade"`
+	Estado     string   `json:"estado"`
 }
 ```
-201 no sucesso; 400 body inválido; 401 sem auth. `user_id` na resposta vem sempre do claim `sub` do JWT, nunca do body.
+`latitude`/`longitude` são opcionais e vão juntas; sem elas o endereço é geocodificado e `cidade` + `estado` passam a ser obrigatórios. 201 no sucesso; 400 body inválido; 401 sem auth; 403 sem `endereco:write`; **422** endereço não localizado; **503** geocodificador indisponível. Não há edição (PUT): cálculos guardam a estação escolhida para a localização original, então corrigir = excluir e criar de novo. `user_id` na resposta vem sempre do claim `sub` do JWT, nunca do body.
 
 `binding.EnableDecoderDisallowUnknownFields = true` está setado globalmente — campos JSON desconhecidos em qualquer request são rejeitados com 400.
 
@@ -162,7 +165,7 @@ Envelope de erro padrão: `{"error": "<mensagem>"}`.
 ## Lógica de negócio (`internal/service/`)
 
 ### `EnderecoService`
-CRUD fino sobre `repository.EnderecoRepository`. `Get`/`Delete` traduzem `repository.ErrNotFound` → `service.ErrEnderecoNotFound`; `Get` também verifica `e.UserID != userID` na própria service (não no banco); `Delete` delega o ownership para a query SQL (`WHERE id=$1 AND user_id=$2`), evitando janela TOCTOU.
+CRUD fino sobre `repository.EnderecoRepository`, mais geocodificação no `Create`: com `Latitude`/`Longitude` nil, chama o `geocoding.Geocoder` injetado (`ErrNotFound` → `ErrAddressNotFound`, falha do provedor → `ErrGeocodingUnavailable`; nada é gravado nesses casos). Normaliza espaços e UF em maiúsculas. `Get`/`Delete` traduzem `repository.ErrNotFound` → `service.ErrEnderecoNotFound`; `Get` também verifica `e.UserID != userID` na própria service (não no banco); `Delete` delega o ownership para a query SQL (`WHERE id=$1 AND user_id=$2`), evitando janela TOCTOU.
 
 ### `PluvialService` — o núcleo da lógica de negócio
 
@@ -179,10 +182,15 @@ CRUD fino sobre `repository.EnderecoRepository`. `Get`/`Delete` traduzem `reposi
 ### Erros sentinela
 ```go
 var (
-	ErrEnderecoNotFound   = errors.New("service: endereco not found")
-	ErrNoStationAvailable = errors.New("service: no weather station available")
+	ErrEnderecoNotFound     = errors.New("service: endereco not found")
+	ErrNoStationAvailable   = errors.New("service: no weather station available")
+	ErrAddressNotFound      = errors.New("service: address could not be located")
+	ErrGeocodingUnavailable = errors.New("service: geocoding unavailable")
 )
 ```
+
+### Geocodificação (`internal/geocoding/`)
+`Geocoder` é uma interface; a implementação é `Nominatim` (OpenStreetMap). Usa a busca estruturada (`street`, `city`, `state`, `countrycodes=br`) do mais preciso para o menos: rua com número → rua sem número → centro da cidade, parando no primeiro resultado. O centro da cidade é impreciso, mas basta para escolher a estação INMET mais próxima. O **CEP não é enviado**: a cobertura de CEP do Nominatim no Brasil é ruim e incluí-lo faz consultas boas voltarem vazias. Respeita a política de uso da instância pública — no máximo 1 requisição/s (limitador no processo) e `User-Agent` identificável (`GEOCODER_USER_AGENT`); timeout de 5s.
 
 ## Repositórios (`internal/repository/postgres/`)
 
@@ -277,14 +285,17 @@ ALTER TABLE pluvial_economy
     ADD COLUMN distance_km  double precision;
 ```
 
+**`000003_endereco_bairro.up.sql`** — `ALTER TABLE enderecos ADD COLUMN bairro text NOT NULL DEFAULT ''` (bairro vindo do ViaCEP, só exibição).
+
 `scripts/seed_dev_stations.sql` **não é uma migration** — fixture de dev que insere 2 estações reais do INMET (`A701` São Paulo - Mirante, `A652` Belo Horizonte - Cercadinho, **atenção**: no catálogo real do INMET o código `A652` na verdade corresponde a "Rio de Janeiro - Forte de Copacabana", não Belo Horizonte — o seed de dev usa esse código com um nome/cidade fictícios só para teste) com chuva mensal sintética, para exercitar o read path sem depender do `inmet-rain-ingestor`.
 
 ## Integração de autenticação
 
-1. `authsdk.Client` é construído no boot com `Audience: "rain-saver"`. Ele busca o JWKS do go-auth-service, monta um verificador local (issuer + chaves), faz um fetch inicial de `/revocations` e inicia um polling em background (padrão 5s) que mantém dois mapas em memória: `jti` revogados e `userInvalidAfter` (invalidação "sair de todos os lugares").
+1. `authsdk.Client` é construído no boot com `Audience: "rain-saver"` e `Issuer: AUTH_ISSUER`. Ele busca o JWKS do go-auth-service, monta um verificador local (issuer + chaves), faz um fetch inicial de `/revocations` e inicia um polling em background (padrão 5s) que mantém dois mapas em memória: `jti` revogados e `userInvalidAfter` (invalidação "sair de todos os lugares").
 2. `RequireAuth` (middleware Gin, `internal/http/middleware.go`): extrai `Authorization: Bearer <token>`, chama `client.Verify(token)` — que valida assinatura ES256, issuer, **audience exatamente `"rain-saver"`** (exige um registro `systems.slug = 'rain-saver'` no banco do go-auth-service), expiração, e por fim a revogação local (cache de polling). Falha → 401 `{"error":"unauthorized: <erro>"}`.
-3. **`user_id` nunca vem do body** — sempre extraído de `claims.Subject` (`sub` do JWT) via `UserIDFromContext`, e é essa a única fonte de verdade para ownership em todos os handlers/services.
-4. rain-saver não guarda nenhuma chave/segredo de JWT localmente — a confiança é inteiramente delegada às chaves públicas do go-auth-service, buscadas no boot.
+3. `RequirePermission(perm)` (após `RequireAuth`) exige o permission string no claim `perms` → 403 `{"error":"forbidden: missing permission <perm>"}`. O catálogo (`endereco:read`, `endereco:write`, `pluvial:calculate`) fica em `deploy/auth-system.json` e é registrado no go-auth-service com `POST /systems` (veja o README).
+4. **`user_id` nunca vem do body** — sempre extraído de `claims.Subject` (`sub` do JWT) via `UserIDFromContext`, e é essa a única fonte de verdade para ownership em todos os handlers/services.
+5. rain-saver não guarda nenhuma chave/segredo de JWT localmente — a confiança é inteiramente delegada às chaves públicas do go-auth-service, buscadas no boot.
 
 ## Configuração (`internal/config/config.go`)
 
@@ -297,7 +308,11 @@ ALTER TABLE pluvial_economy
 | `POSTGRES_USER` | `rainsaver` |
 | `POSTGRES_PASSWORD` | `rainsaver` |
 | `POSTGRES_DB` | `rainsaver` |
-| `AUTH_SERVICE_BASE_URL` | `http://localhost:8080` |
+| `AUTH_SERVICE_BASE_URL` | `http://localhost:8080` (o `.env.example` aponta para o auth na Azure) |
+| `AUTH_ISSUER` | `""` (usa o default do SDK, `auth-service`); deve ser igual ao `AUTH_ISSUER` do auth, que na Azure é a URL dele |
+| `CORS_ALLOWED_ORIGINS` | `""` (CORS desligado); lista separada por vírgula, ex. `http://localhost:5173` |
+| `GEOCODER_URL` | `https://nominatim.openstreetmap.org` |
+| `GEOCODER_USER_AGENT` | `rain-saver (+https://github.com/Davi-OS/rain-saver)` — obrigatório pela política do Nominatim |
 
 ## Build & Deploy
 
@@ -311,7 +326,7 @@ ALTER TABLE pluvial_economy
 
 ## Testes
 
-- `go test ./...`. Testes de repositório contra Postgres real usam `testutil_test.go`: pool via `TEST_DATABASE_URL` (default `postgres://rainsaver:rainsaver@localhost:5433/rainsaver?sslmode=disable`); **skip automático** (não falha) se o banco não estiver acessível; usa um **advisory lock** (`573_918_264`, escolhido para não colidir com o `918_273_645` do go-auth-service) para serializar os testes contra um banco compartilhado, e faz `TRUNCATE ... RESTART IDENTITY CASCADE` antes de cada rodada.
+- `go test ./...`. Testes de repositório contra Postgres real usam `testutil_test.go`: pool via `TEST_DATABASE_URL`, sem default (antes caía no banco de dev): **skip** se a variável não estiver definida ou o banco não estiver acessível, e **falha** se o nome do banco não terminar em `_test`; usa um **advisory lock** (`573_918_264`, escolhido para não colidir com o `918_273_645` do go-auth-service) para serializar os testes contra um banco compartilhado, e faz `TRUNCATE ... RESTART IDENTITY CASCADE` antes de cada rodada.
 - Testes de service usam fakes em memória (`internal/service/fakes_test.go`) — sem necessidade de banco.
 - `internal/http/middleware_test.go` sobe um **servidor JWKS/revocations fake** (`httptest`), assina tokens ES256 com `golang-jwt/jwt/v5` compatíveis com o esquema do go-auth-service, e testa `RequireAuth` fim a fim.
 

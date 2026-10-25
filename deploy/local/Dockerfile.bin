@@ -1,0 +1,12 @@
+# Runtime-only image for a binary prebuilt by build.sh (build context:
+# .build/). No network access needed at build time: alpine already ships the
+# CA bundle, and adduser is busybox.
+FROM alpine:3.20
+
+ARG BIN
+RUN adduser -D -u 10001 appuser
+
+WORKDIR /app
+COPY bin/${BIN} /app/app
+USER appuser
+ENTRYPOINT ["/app/app"]

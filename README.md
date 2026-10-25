@@ -60,15 +60,25 @@ psql "postgres://rainsaver:rainsaver@localhost:5433/rainsaver?sslmode=disable" -
 
 Isso não é uma migration — é só um fixture de desenvolvimento (`scripts/seed_dev_stations.sql`), nunca roda em produção.
 
-### 5. go-auth-service local + pré-requisito de audience
+### 5. go-auth-service (Azure) + sistema `rain-saver`
 
-Este serviço só aceita tokens cuja audience seja `"rain-saver"`. Isso exige uma linha na tabela `systems` do banco do go-auth-service — não existe endpoint HTTP para isso, é um passo manual:
+Este serviço só aceita tokens com audience `"rain-saver"` e issuer igual ao `AUTH_ISSUER` do auth, e exige as permissões `endereco:read`, `endereco:write` e `pluvial:calculate`. O auth roda na Azure (`https://ca-auth.lemonmoss-8726f7e4.northcentralus.azurecontainerapps.io`, veja o `docs/DEPLOY_AZURE.md` do go-auth-service). Configure `AUTH_SERVICE_BASE_URL` e `AUTH_ISSUER` com essa URL, como no `.env.example`. No boot, o rain-saver busca o JWKS e encerra se o auth estiver fora do ar (por exemplo, pausado).
 
-```sql
-INSERT INTO systems (name, slug) VALUES ('Rain Saver', 'rain-saver');
+O sistema é descrito em [`deploy/auth-system.json`](deploy/auth-system.json) e cadastrado uma única vez por um platform admin, sem seeds:
+
+```bash
+AUTH=https://ca-auth.lemonmoss-8726f7e4.northcentralus.azurecontainerapps.io
+read -rp 'e-mail: ' EMAIL; read -rsp 'senha: ' PASS; echo
+login() { jq -nc --arg e "$EMAIL" --arg p "$PASS" --arg o "${1:-}" '{email:$e, password:$p, system:"auth"} + (if $o == "" then {} else {org:$o} end)' | curl -s "$AUTH/login" -d @-; }
+PLATFORM=$(login | jq -r '.orgs[]? | select(.slug == "platform") | .id')   # 409 org_required lista as orgs
+ROOT=$(login "$PLATFORM" | jq -r .access_token)
+jq --arg e "$EMAIL" '. + {admin_email: $e}' deploy/auth-system.json |
+  curl -s "$AUTH/systems" -H "Authorization: Bearer $ROOT" -d @- | jq
 ```
 
-Depois, com o go-auth-service rodando localmente (porta padrão `8080`), autentique um usuário de teste via `POST /login` com `"system": "rain-saver"` para obter um `access_token`.
+Se a conta só pertence à org `platform`, o primeiro `/login` já devolve o token; nesse caso, use `ROOT=$(login | jq -r .access_token)`. O `admin_email` vira admin do sistema (na org dona `rain-saver`). Uma conta que já existe mantém a senha; uma conta nova entra com a senha inicial (`INITIAL_PASSWORD_PREFIX` + `rain-saver`) e precisa trocá-la em `POST /password/change`. Mudanças posteriores no spec: `PUT /systems/rain-saver` com o mesmo JSON (sem `admin_email`), feito por um admin do sistema.
+
+Depois, `POST /login` com `"system": "rain-saver"` devolve o `access_token` aceito aqui. Para subir o rain-saver com banco e estações de dev e rodar o teste ponta a ponta contra a Azure, use a stack em [`deploy/local`](deploy/local/README.md).
 
 ### 6. Rodar
 
@@ -84,20 +94,32 @@ Serve em `http://localhost:8081`. Docs em `/docs`, spec em `/openapi.yaml`, heal
 go test ./...
 ```
 
-Os testes de `internal/repository/postgres` precisam de um Postgres real (mesmo do passo 3 acima, ou aponte `TEST_DATABASE_URL` para outra instância) — sem ele, esses testes são pulados automaticamente (`t.Skip`), não falham.
+Os testes de `internal/repository/postgres` precisam de um Postgres real e fazem `TRUNCATE` de todas as tabelas, então só rodam contra um banco **descartável** indicado em `TEST_DATABASE_URL`, cujo nome termine em `_test`:
+
+```bash
+# uma vez: cria o banco de teste no container do passo 3 e aplica as migrations
+docker exec rain-saver-postgres psql -U rainsaver -d postgres -c "CREATE DATABASE rainsaver_test"
+for f in migrations/*.up.sql; do docker exec -i rain-saver-postgres psql -U rainsaver -d rainsaver_test -v ON_ERROR_STOP=1 -q < "$f"; done
+
+TEST_DATABASE_URL="postgres://rainsaver:rainsaver@localhost:5433/rainsaver_test?sslmode=disable" go test ./...
+```
+
+Sem a variável esses testes são pulados (`t.Skip`, visível com `-v`); com um banco cujo nome não termina em `_test` eles falham de propósito, para nunca apagar o banco de dev.
 
 ## Rotas
 
 Ver `internal/http/openapi.yaml` (ou `/docs` com o servidor rodando) para a especificação completa. Resumo:
 
-| Método | Rota | Auth |
+| Método | Rota | Permissão |
 |---|---|---|
-| GET | `/healthz` | não |
-| GET | `/openapi.yaml`, `/docs` | não |
-| POST, GET | `/enderecos` | sim |
-| GET, DELETE | `/enderecos/:id` | sim |
-| POST, GET | `/enderecos/:id/pluvial-economy` | sim |
+| GET | `/healthz` | — (público) |
+| GET | `/openapi.yaml`, `/docs` | — (público) |
+| POST / GET | `/enderecos` | `endereco:write` / `endereco:read` |
+| GET / DELETE | `/enderecos/:id` | `endereco:read` / `endereco:write` |
+| POST / GET | `/enderecos/:id/pluvial-economy` | `pluvial:calculate` / `endereco:read` |
 
-Todas as rotas protegidas exigem `Authorization: Bearer <token>` emitido pelo go-auth-service para a audience `rain-saver`; o `user_id` de cada recurso vem sempre do claim `sub` do token validado, nunca do corpo da requisição.
+`POST /enderecos` aceita `latitude`/`longitude` opcionais: sem elas o endereço é geocodificado via Nominatim (OpenStreetMap) a partir de logradouro, número, cidade e UF — `422` se não for localizado, `503` se o geocodificador estiver fora.
+
+Sem a permissão da rota a resposta é `403`. Todas as rotas protegidas exigem `Authorization: Bearer <token>` emitido pelo go-auth-service para a audience `rain-saver`; o `user_id` de cada recurso vem sempre do claim `sub` do token validado, nunca do corpo da requisição.
 
 A resposta de `pluvial-economy` inclui `station_code` e `distance_km` — qual estação INMET foi usada e a que distância do endereço, pra rastreabilidade. Se nenhuma estação estiver cadastrada ainda, o cálculo retorna `503`.

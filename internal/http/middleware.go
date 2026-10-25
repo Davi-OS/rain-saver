@@ -40,6 +40,23 @@ func RequireAuth(client *authsdk.Client) gin.HandlerFunc {
 	}
 }
 
+// RequirePermission rejects the request with 403 unless the token carries
+// perm. Must run after RequireAuth. Tokens of accounts without access to
+// rain-saver (no organization enabled for it) carry no permissions at all,
+// so this is also what keeps them out.
+func RequirePermission(perm string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		v, _ := c.Get(claimsContextKey)
+		claims, ok := v.(*authsdk.Claims)
+		if !ok || !claims.HasPermission(perm) {
+			writeError(c, http.StatusForbidden, "forbidden: missing permission "+perm)
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 // UserIDFromContext extracts the authenticated user's id (the JWT sub
 // claim) set by RequireAuth. Handlers must call this rather than trust any
 // client-supplied user id field.

@@ -1,0 +1,78 @@
+# Local stack: rain-saver + its Postgres, migrations and dev stations,
+# consuming the go-auth-service deployed on Azure. Independent from the
+# repo's docker-compose.yml (different project name, no host DB port), so it
+# can run alongside it.
+#
+#   cd deploy/local && ./build.sh && docker compose up --build -d
+#   ./e2e.sh                 # needs E2E_* credentials, see README.md
+#   docker compose down -v   # -v also wipes the DB
+#
+# rain-saver fetches the JWKS at boot and exits if the auth service is
+# unreachable, so the Azure deployment must be running (not paused).
+# The binary is built on the host by build.sh (see why there); the image
+# only copies it in.
+name: rainsaver-local
+
+services:
+  rs-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: rainsaver
+      POSTGRES_PASSWORD: rainsaver
+      POSTGRES_DB: rainsaver
+    volumes:
+      - rs_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rainsaver"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  rs-migrate:
+    image: migrate/migrate:v4.18.1
+    volumes:
+      - ../../migrations:/migrations:ro
+    command: ["-path=/migrations", "-database=postgres://rainsaver:rainsaver@rs-db:5432/rainsaver?sslmode=disable", "up"]
+    depends_on:
+      rs-db: {condition: service_healthy}
+
+  # Dev fixture: two INMET stations with synthetic monthly rainfall.
+  rs-stations:
+    image: postgres:16-alpine
+    volumes:
+      - ../../scripts/seed_dev_stations.sql:/seed.sql:ro
+    command: ["psql", "postgres://rainsaver:rainsaver@rs-db:5432/rainsaver?sslmode=disable", "-v", "ON_ERROR_STOP=1", "-f", "/seed.sql"]
+    depends_on:
+      rs-migrate: {condition: service_completed_successfully}
+
+  rain-saver:
+    build: {context: .build, args: {BIN: rain-saver}}
+    environment:
+      PORT: "8081"
+      POSTGRES_HOST: rs-db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: rainsaver
+      POSTGRES_PASSWORD: rainsaver
+      POSTGRES_DB: rainsaver
+      # go-auth-service on Azure (docs/DEPLOY_AZURE.md in that repo).
+      AUTH_SERVICE_BASE_URL: ${AUTH_SERVICE_BASE_URL:-https://ca-auth.lemonmoss-8726f7e4.northcentralus.azurecontainerapps.io}
+      AUTH_ISSUER: ${AUTH_ISSUER:-https://ca-auth.lemonmoss-8726f7e4.northcentralus.azurecontainerapps.io}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      GEOCODER_URL: ${GEOCODER_URL:-https://nominatim.openstreetmap.org}
+      GEOCODER_USER_AGENT: ${GEOCODER_USER_AGENT:-rain-saver-local-dev (+https://github.com/Davi-OS/rain-saver)}
+    # Public resolvers: geocoding needs outbound DNS, and on some hosts the
+    # resolver Docker hands to containers is unreachable from inside them.
+    dns: [1.1.1.1, 8.8.8.8]
+    ports:
+      - "${RAIN_SAVER_PORT:-8081}:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/healthz >/dev/null"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      rs-migrate: {condition: service_completed_successfully}
+      rs-stations: {condition: service_completed_successfully}
+
+volumes:
+  rs_db:

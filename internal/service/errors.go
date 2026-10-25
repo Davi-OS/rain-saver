@@ -10,4 +10,10 @@ var (
 	// ErrNoStationAvailable means no weather station is registered at all
 	// — the ingestion side hasn't populated weather_stations yet.
 	ErrNoStationAvailable = errors.New("service: no weather station available")
+	// ErrAddressNotFound means the address has no coordinates and the
+	// geocoder could not locate it.
+	ErrAddressNotFound = errors.New("service: address could not be located")
+	// ErrGeocodingUnavailable means the geocoding provider failed or is
+	// unreachable; the client may retry later or send coordinates itself.
+	ErrGeocodingUnavailable = errors.New("service: geocoding unavailable")
 )

@@ -12,14 +12,14 @@ import (
 )
 
 const (
-	createEnderecoQuery = `INSERT INTO enderecos (user_id, logradouro, number, cep, latitude, longitude, cidade, estado)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id::text, user_id::text, logradouro, number, cep, latitude, longitude, cidade, estado, created_at, updated_at`
+	createEnderecoQuery = `INSERT INTO enderecos (user_id, logradouro, number, bairro, cep, latitude, longitude, cidade, estado)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id::text, user_id::text, logradouro, number, bairro, cep, latitude, longitude, cidade, estado, created_at, updated_at`
 
-	getEnderecoByIDQuery = `SELECT id::text, user_id::text, logradouro, number, cep, latitude, longitude, cidade, estado, created_at, updated_at
+	getEnderecoByIDQuery = `SELECT id::text, user_id::text, logradouro, number, bairro, cep, latitude, longitude, cidade, estado, created_at, updated_at
 		FROM enderecos WHERE id = $1`
 
-	listEnderecosByUserIDQuery = `SELECT id::text, user_id::text, logradouro, number, cep, latitude, longitude, cidade, estado, created_at, updated_at
+	listEnderecosByUserIDQuery = `SELECT id::text, user_id::text, logradouro, number, bairro, cep, latitude, longitude, cidade, estado, created_at, updated_at
 		FROM enderecos WHERE user_id = $1 ORDER BY created_at DESC`
 
 	deleteEnderecoQuery = `DELETE FROM enderecos WHERE id = $1 AND user_id = $2`
@@ -36,8 +36,8 @@ func NewEnderecoRepository(pool *pgxpool.Pool) *EnderecoRepository {
 func (r *EnderecoRepository) Create(ctx context.Context, e *domain.Endereco) (*domain.Endereco, error) {
 	var out domain.Endereco
 	err := r.pool.QueryRow(ctx, createEnderecoQuery,
-		e.UserID, e.Logradouro, e.Number, e.Cep, e.Latitude, e.Longitude, e.Cidade, e.Estado,
-	).Scan(&out.ID, &out.UserID, &out.Logradouro, &out.Number, &out.Cep, &out.Latitude, &out.Longitude,
+		e.UserID, e.Logradouro, e.Number, e.Bairro, e.Cep, e.Latitude, e.Longitude, e.Cidade, e.Estado,
+	).Scan(&out.ID, &out.UserID, &out.Logradouro, &out.Number, &out.Bairro, &out.Cep, &out.Latitude, &out.Longitude,
 		&out.Cidade, &out.Estado, &out.CreatedAt, &out.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -48,7 +48,7 @@ func (r *EnderecoRepository) Create(ctx context.Context, e *domain.Endereco) (*d
 func (r *EnderecoRepository) GetByID(ctx context.Context, id string) (*domain.Endereco, error) {
 	var out domain.Endereco
 	err := r.pool.QueryRow(ctx, getEnderecoByIDQuery, id).
-		Scan(&out.ID, &out.UserID, &out.Logradouro, &out.Number, &out.Cep, &out.Latitude, &out.Longitude,
+		Scan(&out.ID, &out.UserID, &out.Logradouro, &out.Number, &out.Bairro, &out.Cep, &out.Latitude, &out.Longitude,
 			&out.Cidade, &out.Estado, &out.CreatedAt, &out.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, repository.ErrNotFound
@@ -69,7 +69,7 @@ func (r *EnderecoRepository) ListByUserID(ctx context.Context, userID string) ([
 	var out []domain.Endereco
 	for rows.Next() {
 		var e domain.Endereco
-		if err := rows.Scan(&e.ID, &e.UserID, &e.Logradouro, &e.Number, &e.Cep, &e.Latitude, &e.Longitude,
+		if err := rows.Scan(&e.ID, &e.UserID, &e.Logradouro, &e.Number, &e.Bairro, &e.Cep, &e.Latitude, &e.Longitude,
 			&e.Cidade, &e.Estado, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, err
 		}

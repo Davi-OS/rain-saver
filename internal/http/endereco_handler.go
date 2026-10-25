@@ -3,6 +3,7 @@ package http
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -11,14 +12,27 @@ import (
 	"github.com/Davi-OS/rain-saver/internal/service"
 )
 
+// Coordinates are optional: without them the address is geocoded from
+// logradouro/number/cidade/estado, so cidade and estado become required.
 type enderecoCreateRequest struct {
-	Logradouro string  `json:"logradouro" binding:"required"`
-	Number     string  `json:"number" binding:"required"`
-	Cep        string  `json:"cep"`
-	Latitude   float64 `json:"latitude" binding:"required"`
-	Longitude  float64 `json:"longitude" binding:"required"`
-	Cidade     string  `json:"cidade"`
-	Estado     string  `json:"estado"`
+	Logradouro string   `json:"logradouro" binding:"required"`
+	Number     string   `json:"number" binding:"required"`
+	Bairro     string   `json:"bairro"`
+	Cep        string   `json:"cep"`
+	Latitude   *float64 `json:"latitude" binding:"omitempty,gte=-90,lte=90"`
+	Longitude  *float64 `json:"longitude" binding:"omitempty,gte=-180,lte=180"`
+	Cidade     string   `json:"cidade"`
+	Estado     string   `json:"estado"`
+}
+
+func (r enderecoCreateRequest) validate() string {
+	if (r.Latitude == nil) != (r.Longitude == nil) {
+		return "latitude and longitude must be sent together"
+	}
+	if r.Latitude == nil && (strings.TrimSpace(r.Cidade) == "" || strings.TrimSpace(r.Estado) == "") {
+		return "cidade and estado are required when latitude/longitude are not sent"
+	}
+	return ""
 }
 
 type enderecoResponse struct {
@@ -26,6 +40,7 @@ type enderecoResponse struct {
 	UserID     string    `json:"user_id"`
 	Logradouro string    `json:"logradouro"`
 	Number     string    `json:"number"`
+	Bairro     string    `json:"bairro"`
 	Cep        string    `json:"cep"`
 	Latitude   float64   `json:"latitude"`
 	Longitude  float64   `json:"longitude"`
@@ -41,6 +56,7 @@ func enderecoToResponse(e *domain.Endereco) enderecoResponse {
 		UserID:     e.UserID,
 		Logradouro: e.Logradouro,
 		Number:     e.Number,
+		Bairro:     e.Bairro,
 		Cep:        e.Cep,
 		Latitude:   e.Latitude,
 		Longitude:  e.Longitude,
@@ -63,18 +79,30 @@ func (s *Server) handleCreateEndereco(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if msg := req.validate(); msg != "" {
+		writeError(c, http.StatusBadRequest, msg)
+		return
+	}
 
 	e, err := s.enderecos.Create(c.Request.Context(), service.CreateEnderecoInput{
 		UserID:     userID,
 		Logradouro: req.Logradouro,
 		Number:     req.Number,
+		Bairro:     req.Bairro,
 		Cep:        req.Cep,
 		Latitude:   req.Latitude,
 		Longitude:  req.Longitude,
 		Cidade:     req.Cidade,
 		Estado:     req.Estado,
 	})
-	if err != nil {
+	switch {
+	case errors.Is(err, service.ErrAddressNotFound):
+		writeError(c, http.StatusUnprocessableEntity, "address could not be located")
+		return
+	case errors.Is(err, service.ErrGeocodingUnavailable):
+		writeError(c, http.StatusServiceUnavailable, "geocoding unavailable, try again later")
+		return
+	case err != nil:
 		writeError(c, http.StatusInternalServerError, "internal error")
 		return
 	}
