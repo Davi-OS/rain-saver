@@ -7,5 +7,6 @@
     "member": ["endereco:read", "endereco:write", "pluvial:calculate"]
   },
   "admin_role": "owner",
-  "web_origins": ["https://davi-os.github.io"]
+  "web_origins": ["https://davi-os.github.io"],
+  "self_signup": true
 }

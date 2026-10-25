@@ -113,6 +113,8 @@ type StationMonthlyRainfall struct {
 
 Não existe struct `User`: identidade vive inteiramente no go-auth-service; `enderecos.user_id` é um `uuid` sem FK local (documentado na própria migration).
 
+**Contas e orgs:** o sistema tem `self_signup` (em `deploy/auth-system.json`). Cada cadastro público (`POST /signup` do go-auth-service) cria uma org pessoal (tenant) do rain-saver, com a pessoa como `owner`, e o token traz essa org em `org`. Os dados daqui continuam escopados por usuário (`sub`). Quando vierem assinatura e planos, que se prendem à org (plano família = membros na mesma org; inadimplência = suspender o tenant no auth), a migração natural é escopar `enderecos` por `org`.
+
 ## Endpoints HTTP
 
 Middleware global: `gin.Recovery()`, CORS (`CORS_ALLOWED_ORIGINS`) + limite de 1MB no corpo da requisição. Todas as rotas exceto `/openapi.yaml`, `/docs` e `/healthz` exigem `RequireAuth` **e** uma permissão do sistema `rain-saver` (`RequirePermission`, 403 sem ela).
