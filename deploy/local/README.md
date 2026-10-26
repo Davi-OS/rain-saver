@@ -66,9 +66,8 @@ nem Google Sign-In.
 
 ## Por que o binário é compilado no host
 
-O go-auth-service é um módulo privado. O `Dockerfile` do rain-saver precisa
-de um `~/.netrc` com token do GitHub, e builds Docker precisam de DNS para o
-`go mod download`. O `build.sh` compila com o toolchain e o cache de módulos
-do host (`GOPRIVATE=github.com/Davi-OS/*`), e a imagem só copia o binário.
+Builds Docker precisam de DNS para o `go mod download`, que falhou de forma
+intermitente com o DNS padrão do Docker. O `build.sh` compila com o toolchain
+e o cache de módulos do host, e a imagem só copia o binário.
 Por isso, o `Dockerfile` de produção não é exercitado aqui. Rode `./build.sh`
 de novo sempre que mudar código Go.

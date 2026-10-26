@@ -13,18 +13,9 @@ Os dados de chuva (`weather_stations`, `station_monthly_rainfall`) são povoados
 
 ## Setup local
 
-### 1. Dependência privada (`go-auth-service`)
+### 1. Dependências
 
-`go.mod` depende de `github.com/Davi-OS/go-auth-service` (repositório privado). Antes de rodar `go build`/`go mod download`/`go get`:
-
-```bash
-export GOPRIVATE=github.com/Davi-OS/*
-# confirme que o git consegue acessar o repo privado (ex: via gh auth setup-git,
-# ou uma chave SSH/PAT configurada)
-git ls-remote https://github.com/Davi-OS/go-auth-service
-```
-
-Isso também vale para builds Docker (veja o `Dockerfile`) e para qualquer CI futuro — sem acesso git ao repositório privado, o build falha ao resolver essa dependência.
+Todas são públicas. O SDK do auth é o [`github.com/Davi-OS/go-auth-sdk`](https://github.com/Davi-OS/go-auth-sdk), então `go build` e `docker build -t rain-saver .` não precisam de credencial do GitHub.
 
 ### 2. Variáveis de ambiente
 

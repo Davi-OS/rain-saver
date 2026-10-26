@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Davi-OS/go-auth-service/pkg/authsdk"
+	"github.com/Davi-OS/go-auth-sdk/authsdk"
 
 	"github.com/Davi-OS/rain-saver/internal/config"
 	"github.com/Davi-OS/rain-saver/internal/geocoding"
