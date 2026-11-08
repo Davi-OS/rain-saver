@@ -195,7 +195,7 @@ CRUD fino sobre `repository.EnderecoRepository`, mais geocodificação no `Creat
 ### `SolarService`
 
 `Calculate(ctx, enderecoID, userID, panelPowerW, panelCount)` segue o mesmo fluxo, com duas diferenças:
-- Usa `stations.NearestWithSolar`, que só considera estações com linhas em `station_monthly_solar`. Muitas estações medem chuva mas não têm piranômetro funcionando, então a estação usada pode não ser a mesma do cálculo pluvial. Sem nenhuma → `ErrNoSolarStationAvailable`.
+- Usa `stations.NearestWithSolar`, que só considera estações com um **ano completo** em `station_monthly_solar`: os 12 meses mais recentes da estação, seguidos. Muitas estações medem chuva mas não têm piranômetro funcionando, e o ingestor descarta os meses de sensores com defeito (trava de plausibilidade por índice de claridade), então a estação usada pode não ser a mesma do cálculo pluvial. Exigir 12 meses *seguidos* (e não 12 linhas quaisquer) evita que um buraco faça a janela cobrir 13 meses e distorça o total anual. Sem nenhuma → `ErrNoSolarStationAvailable`.
 - **Fórmula**: `kWp = W × qtd / 1000` e `GeneratedKWh = round(kWp × avg_daily_kwh_m2 × dias_no_mês × (1 − 0,15), 2)`. A irradiação média diária em kWh/m²/dia equivale às horas de sol pleno, porque a potência nominal da placa é medida a 1000 W/m². O cálculo usa o plano horizontal, sem inclinação/orientação. A perda (`solarLossFactor`) é gravada em cada cálculo.
 
 `ownedEndereco` é compartilhada pelos dois services.
@@ -230,7 +230,7 @@ var (
   LIMIT 1
   ```
   `MonthlyRainfall(code, n)`: subquery pega as `n` linhas mais recentes (`ORDER BY ... DESC`), a query externa reordena cronologicamente — não assume que a tabela tem exatamente N linhas, mantendo o rain-saver desacoplado da política de retenção do lado de ingestão.
-  `NearestWithSolar` é a mesma Haversine com `WHERE EXISTS (... station_monthly_solar ...)`; `MonthlySolar(code, n)` espelha `MonthlyRainfall`.
+  `NearestWithSolar` é a mesma Haversine restrita às estações cujos 12 meses mais recentes de `station_monthly_solar` estão todos presentes (contador `year*12+month`, então virada de ano não quebra a sequência); `MonthlySolar(code, n)` espelha `MonthlyRainfall`.
 - **`SolarEconomyRepository`** (`solar_economy` + `solar_monthly_generation`): mesmo padrão transacional e append-only do `PluvialEconomyRepository`.
 
 ## Schema do banco (migrations, em ordem)

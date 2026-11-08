@@ -116,4 +116,4 @@ Sem a permissão da rota a resposta é `403`. Todas as rotas protegidas exigem `
 
 A resposta de `pluvial-economy` inclui `station_code` e `distance_km` — qual estação INMET foi usada e a que distância do endereço, pra rastreabilidade. Se nenhuma estação estiver cadastrada ainda, o cálculo retorna `503`.
 
-`solar-economy` recebe `{panel_power_w, panel_count}` e estima a geração fotovoltaica mês a mês com a irradiação da estação mais próxima **que tenha dado solar** (`kWh = kWp × kWh/m²/dia × dias × 0,85`, perda fixa de 15%, plano horizontal). Retorna `503` se nenhuma estação tiver dado solar.
+`solar-economy` recebe `{panel_power_w, panel_count}` e estima a geração fotovoltaica mês a mês com a irradiação da estação mais próxima **com um ano completo de dado solar** (os 12 meses mais recentes, seguidos; o ingestor descarta meses de sensores com defeito) (`kWh = kWp × kWh/m²/dia × dias × 0,85`, perda fixa de 15%, plano horizontal). Retorna `503` se nenhuma estação tiver um ano completo de dado solar.

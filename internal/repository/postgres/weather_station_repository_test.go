@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Davi-OS/rain-saver/internal/repository"
 )
 
@@ -89,37 +91,69 @@ func TestWeatherStationRepository_MonthlyRainfall(t *testing.T) {
 	}
 }
 
-func TestWeatherStationRepository_NearestWithSolarSkipsStationsWithoutSolar(t *testing.T) {
+// seedSolarMonths inserts n consecutive months of solar data for a station
+// starting at (year, month), skipping the given offsets (0 = the first month).
+func seedSolarMonths(t *testing.T, pool *pgxpool.Pool, code string, year, month, n int, skip ...int) {
+	t.Helper()
+	skipped := map[int]bool{}
+	for _, s := range skip {
+		skipped[s] = true
+	}
+	for i := 0; i < n; i++ {
+		if skipped[i] {
+			continue
+		}
+		idx := year*12 + (month - 1) + i
+		_, err := pool.Exec(context.Background(),
+			`INSERT INTO station_monthly_solar (station_code, year, month, avg_daily_kwh_m2, valid_days) VALUES ($1, $2, $3, 5.5, 30)`,
+			code, idx/12, idx%12+1)
+		if err != nil {
+			t.Fatalf("seedSolarMonths(%s): %v", code, err)
+		}
+	}
+}
+
+func TestWeatherStationRepository_NearestWithSolarOnlyUsesCompleteYears(t *testing.T) {
 	pool := testPool(t)
 	repo := NewWeatherStationRepository(pool)
 	ctx := context.Background()
 
+	// All four stations sit near São Paulo, closest first, so a station is
+	// only chosen if the closer ones are rejected.
 	_, err := pool.Exec(ctx, `INSERT INTO weather_stations (code, name, latitude, longitude, uf) VALUES
-		('A701', 'SAO PAULO - MIRANTE', -23.4977, -46.6202, 'SP'),
-		('A652', 'BELO HORIZONTE - CERCADINHO', -19.9392, -43.9386, 'MG')`)
+		('NOSOLAR', 'NO SOLAR DATA', -23.50, -46.60, 'SP'),
+		('SHORT', 'ELEVEN MONTHS', -23.52, -46.62, 'SP'),
+		('GAP', 'TWELVE MONTHS WITH A GAP', -23.54, -46.64, 'SP'),
+		('FULL', 'TWELVE CONSECUTIVE MONTHS', -23.56, -46.66, 'SP'),
+		('FAR', 'BELO HORIZONTE', -19.9392, -43.9386, 'MG')`)
 	if err != nil {
 		t.Fatalf("seed stations: %v", err)
 	}
 
-	// No station has solar data yet.
+	// Nobody has solar data yet.
 	if _, _, err := repo.NearestWithSolar(ctx, -23.55, -46.63); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("NearestWithSolar() with no solar data error = %v, want ErrNotFound", err)
 	}
 
-	// Only Belo Horizonte has solar data: a point in São Paulo resolves to it.
-	_, err = pool.Exec(ctx, `INSERT INTO station_monthly_solar (station_code, year, month, avg_daily_kwh_m2, valid_days) VALUES ('A652', 2025, 1, 5.5, 30)`)
-	if err != nil {
-		t.Fatalf("seed monthly solar: %v", err)
+	seedSolarMonths(t, pool, "SHORT", 2025, 9, 11)
+	// 13 months starting in 2025-06 with the 3rd one missing: 12 rows, but
+	// the latest 12 months (2025-07..2026-06) include the gap at 2025-08.
+	seedSolarMonths(t, pool, "GAP", 2025, 6, 13, 2)
+	if _, _, err := repo.NearestWithSolar(ctx, -23.55, -46.63); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("NearestWithSolar() with only short/gappy stations error = %v, want ErrNotFound", err)
 	}
-	station, distanceKm, err := repo.NearestWithSolar(ctx, -23.55, -46.63)
+
+	// 12 consecutive months across a year boundary: 2025-09..2026-08.
+	seedSolarMonths(t, pool, "FULL", 2025, 9, 12)
+	// Complete too, but much farther away.
+	seedSolarMonths(t, pool, "FAR", 2025, 9, 12)
+
+	station, _, err := repo.NearestWithSolar(ctx, -23.55, -46.63)
 	if err != nil {
 		t.Fatalf("NearestWithSolar() error = %v", err)
 	}
-	if station.Code != "A652" {
-		t.Errorf("NearestWithSolar() code = %q, want A652", station.Code)
-	}
-	if distanceKm < 400 {
-		t.Errorf("NearestWithSolar() distanceKm = %v, want the SP→BH distance (~490 km)", distanceKm)
+	if station.Code != "FULL" {
+		t.Errorf("NearestWithSolar() code = %q, want FULL (the closest station with a complete year)", station.Code)
 	}
 }
 
