@@ -40,9 +40,11 @@ type WeatherStationRepository interface {
 	// happens at read time, so rain-saver stays decoupled from however the
 	// ingestion side decides to retain history.
 	MonthlyRainfall(ctx context.Context, stationCode string, months int) ([]domain.StationMonthlyRainfall, error)
-	// NearestWithSolar is Nearest restricted to stations with at least one
-	// month of solar data — many stations report rainfall but have no
-	// working pyranometer. ErrNotFound if none has solar data.
+	// NearestWithSolar is Nearest restricted to stations with a complete
+	// year of solar data: their 12 most recent months, consecutive. Many
+	// stations report rainfall but have no working pyranometer, and the
+	// ingestor drops months from faulty sensors. ErrNotFound if none
+	// qualifies.
 	NearestWithSolar(ctx context.Context, latitude, longitude float64) (*domain.WeatherStation, float64, error)
 	// MonthlySolar is MonthlyRainfall for station_monthly_solar.
 	MonthlySolar(ctx context.Context, stationCode string, months int) ([]domain.StationMonthlySolar, error)

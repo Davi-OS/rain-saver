@@ -21,10 +21,21 @@ const (
 		ORDER BY distance_km ASC
 		LIMIT 1`
 
-	nearestSolarStationQuery = `SELECT code, name, latitude, longitude, uf, created_at,
+	// Only stations whose latest 12 months are all present qualify (i is a
+	// month counter, so a gap or a year boundary doesn't break the run). The
+	// ingestor drops months from faulty sensors, so "12 rows" isn't enough: a
+	// gap would make the last 12 rows span 13 months and skew the annual total.
+	nearestSolarStationQuery = `WITH latest AS (
+			SELECT station_code, max(year * 12 + month) AS i FROM station_monthly_solar GROUP BY station_code
+		), complete AS (
+			SELECT l.station_code FROM latest l
+			JOIN station_monthly_solar s ON s.station_code = l.station_code AND s.year * 12 + s.month BETWEEN l.i - 11 AND l.i
+			GROUP BY l.station_code HAVING count(*) = 12
+		)
+		SELECT code, name, latitude, longitude, uf, created_at,
 		(6371 * acos(cos(radians($1)) * cos(radians(latitude)) * cos(radians(longitude) - radians($2)) + sin(radians($1)) * sin(radians(latitude)))) AS distance_km
-		FROM weather_stations ws
-		WHERE EXISTS (SELECT 1 FROM station_monthly_solar sms WHERE sms.station_code = ws.code)
+		FROM weather_stations
+		WHERE code IN (SELECT station_code FROM complete)
 		ORDER BY distance_km ASC
 		LIMIT 1`
 
