@@ -10,6 +10,9 @@ var (
 	// ErrNoStationAvailable means no weather station is registered at all
 	// — the ingestion side hasn't populated weather_stations yet.
 	ErrNoStationAvailable = errors.New("service: no weather station available")
+	// ErrNoSolarStationAvailable means no station has solar data yet — the
+	// ingestion side hasn't populated station_monthly_solar.
+	ErrNoSolarStationAvailable = errors.New("service: no weather station with solar data available")
 	// ErrAddressNotFound means the address has no coordinates and the
 	// geocoder could not locate it.
 	ErrAddressNotFound = errors.New("service: address could not be located")

@@ -21,9 +21,25 @@ const (
 		ORDER BY distance_km ASC
 		LIMIT 1`
 
+	nearestSolarStationQuery = `SELECT code, name, latitude, longitude, uf, created_at,
+		(6371 * acos(cos(radians($1)) * cos(radians(latitude)) * cos(radians(longitude) - radians($2)) + sin(radians($1)) * sin(radians(latitude)))) AS distance_km
+		FROM weather_stations ws
+		WHERE EXISTS (SELECT 1 FROM station_monthly_solar sms WHERE sms.station_code = ws.code)
+		ORDER BY distance_km ASC
+		LIMIT 1`
+
 	monthlyRainfallQuery = `SELECT station_code, year, month, rainfall_mm FROM (
 		SELECT station_code, year, month, rainfall_mm
 		FROM station_monthly_rainfall
+		WHERE station_code = $1
+		ORDER BY year DESC, month DESC
+		LIMIT $2
+	) recent
+	ORDER BY year, month`
+
+	monthlySolarQuery = `SELECT station_code, year, month, avg_daily_kwh_m2 FROM (
+		SELECT station_code, year, month, avg_daily_kwh_m2
+		FROM station_monthly_solar
 		WHERE station_code = $1
 		ORDER BY year DESC, month DESC
 		LIMIT $2
@@ -40,9 +56,17 @@ func NewWeatherStationRepository(pool *pgxpool.Pool) *WeatherStationRepository {
 }
 
 func (r *WeatherStationRepository) Nearest(ctx context.Context, latitude, longitude float64) (*domain.WeatherStation, float64, error) {
+	return r.nearest(ctx, nearestStationQuery, latitude, longitude)
+}
+
+func (r *WeatherStationRepository) NearestWithSolar(ctx context.Context, latitude, longitude float64) (*domain.WeatherStation, float64, error) {
+	return r.nearest(ctx, nearestSolarStationQuery, latitude, longitude)
+}
+
+func (r *WeatherStationRepository) nearest(ctx context.Context, query string, latitude, longitude float64) (*domain.WeatherStation, float64, error) {
 	var s domain.WeatherStation
 	var distanceKm float64
-	err := r.pool.QueryRow(ctx, nearestStationQuery, latitude, longitude).
+	err := r.pool.QueryRow(ctx, query, latitude, longitude).
 		Scan(&s.Code, &s.Name, &s.Latitude, &s.Longitude, &s.UF, &s.CreatedAt, &distanceKm)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, 0, repository.ErrNotFound
@@ -64,6 +88,24 @@ func (r *WeatherStationRepository) MonthlyRainfall(ctx context.Context, stationC
 	for rows.Next() {
 		var m domain.StationMonthlyRainfall
 		if err := rows.Scan(&m.StationCode, &m.Year, &m.Month, &m.RainfallMM); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+func (r *WeatherStationRepository) MonthlySolar(ctx context.Context, stationCode string, months int) ([]domain.StationMonthlySolar, error) {
+	rows, err := r.pool.Query(ctx, monthlySolarQuery, stationCode, months)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []domain.StationMonthlySolar
+	for rows.Next() {
+		var m domain.StationMonthlySolar
+		if err := rows.Scan(&m.StationCode, &m.Year, &m.Month, &m.AvgDailyKWhM2); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

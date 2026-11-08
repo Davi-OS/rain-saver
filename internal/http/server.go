@@ -13,17 +13,18 @@ type Server struct {
 	router     *gin.Engine
 	enderecos  *service.EnderecoService
 	pluvial    *service.PluvialService
+	solar      *service.SolarService
 	authClient *authsdk.Client
 }
 
 // allowedOrigins configures CORS for browser clients (empty disables it).
-func NewServer(enderecos *service.EnderecoService, pluvial *service.PluvialService, authClient *authsdk.Client, allowedOrigins []string) *Server {
+func NewServer(enderecos *service.EnderecoService, pluvial *service.PluvialService, solar *service.SolarService, authClient *authsdk.Client, allowedOrigins []string) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
 	router.Use(gin.Recovery(), corsMiddleware(allowedOrigins), maxBodySizeMiddleware)
 
-	s := &Server{router: router, enderecos: enderecos, pluvial: pluvial, authClient: authClient}
+	s := &Server{router: router, enderecos: enderecos, pluvial: pluvial, solar: solar, authClient: authClient}
 	s.routes()
 	return s
 }
@@ -38,6 +39,7 @@ const (
 	PermEnderecoRead     = "endereco:read"
 	PermEnderecoWrite    = "endereco:write"
 	PermPluvialCalculate = "pluvial:calculate"
+	PermSolarCalculate   = "solar:calculate"
 )
 
 func (s *Server) routes() {
@@ -54,6 +56,8 @@ func (s *Server) routes() {
 		protected.DELETE("/enderecos/:id", RequirePermission(PermEnderecoWrite), s.handleDeleteEndereco)
 		protected.POST("/enderecos/:id/pluvial-economy", RequirePermission(PermPluvialCalculate), s.handleCalculatePluvialEconomy)
 		protected.GET("/enderecos/:id/pluvial-economy", RequirePermission(PermEnderecoRead), s.handleGetLatestPluvialEconomy)
+		protected.POST("/enderecos/:id/solar-economy", RequirePermission(PermSolarCalculate), s.handleCalculateSolarEconomy)
+		protected.GET("/enderecos/:id/solar-economy", RequirePermission(PermEnderecoRead), s.handleGetLatestSolarEconomy)
 	}
 }
 
