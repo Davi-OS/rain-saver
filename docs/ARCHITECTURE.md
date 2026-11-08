@@ -1,6 +1,6 @@
 # rain-saver — Documentação Técnica
 
-Backend principal da solução Rain Saver: gerencia endereços de usuários e calcula a economia de água obtida com captação pluvial, usando dados de chuva de estações meteorológicas do INMET. Não possui tabela local de usuários — identidade é delegada inteiramente ao [go-auth-service](../../go-auth-service/docs/ARCHITECTURE.md).
+Backend principal da solução Rain Saver: gerencia endereços de usuários, calcula a economia de água obtida com captação pluvial e estima a geração de painéis solares, usando dados de chuva e radiação de estações meteorológicas do INMET. Não possui tabela local de usuários — identidade é delegada inteiramente ao [go-auth-service](../../go-auth-service/docs/ARCHITECTURE.md).
 
 ## Visão geral
 
@@ -12,12 +12,12 @@ Backend principal da solução Rain Saver: gerencia endereços de usuários e ca
 cmd/api/main.go
 internal/
   config/config.go
-  domain/{endereco,pluvial_economy,weather_station}.go
-  http/{server,middleware,docs,json,endereco_handler,pluvial_handler,healthz_handler}.go
+  domain/{endereco,pluvial_economy,solar_economy,weather_station}.go
+  http/{server,middleware,docs,json,endereco_handler,pluvial_handler,solar_handler,healthz_handler}.go
   http/openapi.yaml            (embutido no binário via go:embed)
   repository/repository.go     (interfaces + ErrNotFound)
-  repository/postgres/{postgres,endereco_repository,pluvial_economy_repository,weather_station_repository}.go
-  service/{endereco_service,pluvial_service,errors}.go
+  repository/postgres/{postgres,endereco_repository,pluvial_economy_repository,solar_economy_repository,weather_station_repository}.go
+  service/{endereco_service,pluvial_service,solar_service,errors}.go
 migrations/                    (golang-migrate)
 scripts/seed_dev_stations.sql  (fixture de dev, NÃO é migration)
 ```
@@ -37,9 +37,9 @@ scripts/seed_dev_stations.sql  (fixture de dev, NÃO é migration)
 1. `config.Load()` — lê env (com fallback `.env`).
 2. `postgres.NewPool(ctx, cfg.DSN())` — abre e faz ping no pool pgx.
 3. `authsdk.New(ctx, authsdk.Config{BaseURL: cfg.AuthServiceBaseURL, Audience: "rain-saver"})` — busca o JWKS do go-auth-service e inicia o polling de revogação em background.
-4. Três repositórios Postgres (`Endereco`, `PluvialEconomy`, `WeatherStation`), todos sobre o mesmo pool.
-5. Dois services: `EnderecoService(enderecoRepo)` e `PluvialService(enderecoRepo, economyRepo, stationRepo)`.
-6. `rainhttp.NewServer(enderecoSvc, pluvialSvc, authClient)` monta o router Gin.
+4. Quatro repositórios Postgres (`Endereco`, `PluvialEconomy`, `SolarEconomy`, `WeatherStation`), todos sobre o mesmo pool.
+5. Três services: `EnderecoService(enderecoRepo)`, `PluvialService(enderecoRepo, economyRepo, stationRepo)` e `SolarService(enderecoRepo, solarRepo, stationRepo)`.
+6. `rainhttp.NewServer(enderecoSvc, pluvialSvc, solarSvc, authClient, origins)` monta o router Gin.
 7. `net/http.Server` (ReadTimeout 5s, WriteTimeout 10s), com graceful shutdown em SIGINT/SIGTERM (timeout de 10s).
 
 ## Domain model
@@ -130,6 +130,8 @@ Middleware global: `gin.Recovery()`, CORS (`CORS_ALLOWED_ORIGINS`) + limite de 1
 | DELETE | `/enderecos/:id` | `endereco:write` | Remove um endereço (ownership obrigatório) |
 | POST | `/enderecos/:id/pluvial-economy` | `pluvial:calculate` | Calcula e persiste uma nova economia pluvial |
 | GET | `/enderecos/:id/pluvial-economy` | `endereco:read` | Retorna o cálculo mais recente para o endereço |
+| POST | `/enderecos/:id/solar-economy` | `solar:calculate` | Estima e persiste uma nova geração solar |
+| GET | `/enderecos/:id/solar-economy` | `endereco:read` | Retorna a estimativa solar mais recente para o endereço |
 
 Contas sem acesso ao rain-saver (sem organização habilitada para o sistema) recebem tokens sem `org` e **sem permissões**, então `RequirePermission` também as barra. Os dados continuam escopados por usuário (`sub`); o claim `org` ainda não é usado para escopo.
 
@@ -162,6 +164,15 @@ Resposta inclui `station_code`, `distance_km` e `monthly_captation: []{year, mon
 
 **GET /enderecos/:id/pluvial-economy** — 200; 401; 404 `{"error":"no pluvial economy calculated for this endereco"}`.
 
+**POST /enderecos/:id/solar-economy** — request:
+```go
+type solarCalculationRequest struct {
+	PanelPowerW float64 `json:"panel_power_w" binding:"required,gt=0,lte=1000"`
+	PanelCount  int     `json:"panel_count" binding:"required,gte=1,lte=1000"`
+}
+```
+Resposta inclui `system_kwp`, `loss_factor`, `station_code`, `distance_km`, `total_kwh`, `monthly_avg_kwh` (calculados na resposta, não persistidos) e `monthly_generation: []{year, month, avg_daily_kwh_m2, generated_kwh}`. Status: 201; 400; 401; 404; **503** `{"error":"no weather station with solar data available"}`. O GET espelha o da pluvial.
+
 Envelope de erro padrão: `{"error": "<mensagem>"}`.
 
 ## Lógica de negócio (`internal/service/`)
@@ -180,6 +191,14 @@ CRUD fino sobre `repository.EnderecoRepository`, mais geocodificação no `Creat
 6. Persiste tudo transacionalmente via `economies.Create`.
 
 `Latest(ctx, enderecoID, userID)`: mesmo ownership check, delega para `economies.GetLatestByEnderecoID`.
+
+### `SolarService`
+
+`Calculate(ctx, enderecoID, userID, panelPowerW, panelCount)` segue o mesmo fluxo, com duas diferenças:
+- Usa `stations.NearestWithSolar`, que só considera estações com linhas em `station_monthly_solar`. Muitas estações medem chuva mas não têm piranômetro funcionando, então a estação usada pode não ser a mesma do cálculo pluvial. Sem nenhuma → `ErrNoSolarStationAvailable`.
+- **Fórmula**: `kWp = W × qtd / 1000` e `GeneratedKWh = round(kWp × avg_daily_kwh_m2 × dias_no_mês × (1 − 0,15), 2)`. A irradiação média diária em kWh/m²/dia equivale às horas de sol pleno, porque a potência nominal da placa é medida a 1000 W/m². O cálculo usa o plano horizontal, sem inclinação/orientação. A perda (`solarLossFactor`) é gravada em cada cálculo.
+
+`ownedEndereco` é compartilhada pelos dois services.
 
 ### Erros sentinela
 ```go
@@ -211,6 +230,8 @@ var (
   LIMIT 1
   ```
   `MonthlyRainfall(code, n)`: subquery pega as `n` linhas mais recentes (`ORDER BY ... DESC`), a query externa reordena cronologicamente — não assume que a tabela tem exatamente N linhas, mantendo o rain-saver desacoplado da política de retenção do lado de ingestão.
+  `NearestWithSolar` é a mesma Haversine com `WHERE EXISTS (... station_monthly_solar ...)`; `MonthlySolar(code, n)` espelha `MonthlyRainfall`.
+- **`SolarEconomyRepository`** (`solar_economy` + `solar_monthly_generation`): mesmo padrão transacional e append-only do `PluvialEconomyRepository`.
 
 ## Schema do banco (migrations, em ordem)
 
@@ -289,13 +310,15 @@ ALTER TABLE pluvial_economy
 
 **`000003_endereco_bairro.up.sql`** — `ALTER TABLE enderecos ADD COLUMN bairro text NOT NULL DEFAULT ''` (bairro vindo do ViaCEP, só exibição).
 
+**`000004_solar.up.sql`** — `station_monthly_solar (station_code, year, month, avg_daily_kwh_m2, valid_days)`, escrita pelo `inmet-rain-ingestor`, e o log append-only `solar_economy` + `solar_monthly_generation`, que espelha o pluvial. Precisa rodar **antes** do ingestor novo: sem a tabela, a transação de cada estação falha, e nem a chuva é gravada.
+
 `scripts/seed_dev_stations.sql` **não é uma migration** — fixture de dev que insere 2 estações reais do INMET (`A701` São Paulo - Mirante, `A652` Belo Horizonte - Cercadinho, **atenção**: no catálogo real do INMET o código `A652` na verdade corresponde a "Rio de Janeiro - Forte de Copacabana", não Belo Horizonte — o seed de dev usa esse código com um nome/cidade fictícios só para teste) com chuva mensal sintética, para exercitar o read path sem depender do `inmet-rain-ingestor`.
 
 ## Integração de autenticação
 
 1. `authsdk.Client` é construído no boot com `Audience: "rain-saver"` e `Issuer: AUTH_ISSUER`. Ele busca o JWKS do go-auth-service, monta um verificador local (issuer + chaves), faz um fetch inicial de `/revocations` e inicia um polling em background (padrão 5s) que mantém dois mapas em memória: `jti` revogados e `userInvalidAfter` (invalidação "sair de todos os lugares").
 2. `RequireAuth` (middleware Gin, `internal/http/middleware.go`): extrai `Authorization: Bearer <token>`, chama `client.Verify(token)` — que valida assinatura ES256, issuer, **audience exatamente `"rain-saver"`** (exige um registro `systems.slug = 'rain-saver'` no banco do go-auth-service), expiração, e por fim a revogação local (cache de polling). Falha → 401 `{"error":"unauthorized: <erro>"}`.
-3. `RequirePermission(perm)` (após `RequireAuth`) exige o permission string no claim `perms` → 403 `{"error":"forbidden: missing permission <perm>"}`. O catálogo (`endereco:read`, `endereco:write`, `pluvial:calculate`) fica em `deploy/auth-system.json` e é registrado no go-auth-service com `POST /systems` (veja o README).
+3. `RequirePermission(perm)` (após `RequireAuth`) exige o permission string no claim `perms` → 403 `{"error":"forbidden: missing permission <perm>"}`. O catálogo (`endereco:read`, `endereco:write`, `pluvial:calculate`, `solar:calculate`) fica em `deploy/auth-system.json` e é registrado no go-auth-service com `POST /systems` (veja o README). Mudanças são aplicadas com `PUT /systems/rain-saver`, que reescreve as permissões dos papéis padrão e, por consequência, alcança todos os tenants.
 4. **`user_id` nunca vem do body** — sempre extraído de `claims.Subject` (`sub` do JWT) via `UserIDFromContext`, e é essa a única fonte de verdade para ownership em todos os handlers/services.
 5. rain-saver não guarda nenhuma chave/segredo de JWT localmente — a confiança é inteiramente delegada às chaves públicas do go-auth-service, buscadas no boot.
 

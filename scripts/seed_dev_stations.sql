@@ -23,3 +23,12 @@ INSERT INTO station_monthly_rainfall (station_code, year, month, rainfall_mm) VA
     ('A652', 2026, 1, 230), ('A652', 2026, 2, 170),  ('A652', 2026, 3, 140),  ('A652', 2026, 4, 40),
     ('A652', 2026, 5, 20),  ('A652', 2026, 6, 10),   ('A652', 2026, 7, 5),    ('A652', 2026, 8, 15)
 ON CONFLICT (station_code, year, month) DO NOTHING;
+
+-- Synthetic average daily irradiation (kWh/m²/day) for A701 only, so the
+-- solar path also exercises "nearest station with solar data" for addresses
+-- near A652 — illustrative only, not real INMET measurements.
+INSERT INTO station_monthly_solar (station_code, year, month, avg_daily_kwh_m2, valid_days) VALUES
+    ('A701', 2025, 9, 4.4, 30), ('A701', 2025, 10, 4.9, 31), ('A701', 2025, 11, 5.3, 30), ('A701', 2025, 12, 5.5, 31),
+    ('A701', 2026, 1, 5.6, 31), ('A701', 2026, 2, 5.4, 28),  ('A701', 2026, 3, 4.9, 31),  ('A701', 2026, 4, 4.3, 30),
+    ('A701', 2026, 5, 3.7, 31), ('A701', 2026, 6, 3.4, 30),  ('A701', 2026, 7, 3.6, 31),  ('A701', 2026, 8, 4.2, 31)
+ON CONFLICT (station_code, year, month) DO NOTHING;

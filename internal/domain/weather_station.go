@@ -20,3 +20,13 @@ type StationMonthlyRainfall struct {
 	Month       int
 	RainfallMM  float64
 }
+
+// StationMonthlySolar is a month's average daily global horizontal
+// irradiation in kWh/m²/day — numerically the month's peak sun hours —
+// compiled by the INMET ingestor from hourly readings.
+type StationMonthlySolar struct {
+	StationCode   string
+	Year          int
+	Month         int
+	AvgDailyKWhM2 float64
+}

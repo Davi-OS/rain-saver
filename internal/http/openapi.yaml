@@ -14,6 +14,7 @@ servers:
 tags:
   - name: enderecos
   - name: pluvial-economy
+  - name: solar-economy
   - name: health
 paths:
   /healthz:
@@ -172,6 +173,63 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /enderecos/{id}/solar-economy:
+    post:
+      tags: [solar-economy]
+      summary: Estimate and persist monthly photovoltaic generation for an address
+      description: >
+        Uses the last 12 months of average daily global horizontal
+        irradiation from the nearest INMET station with solar data:
+        generated_kwh = system_kwp × avg_daily_kwh_m2 × days_in_month ×
+        (1 − loss_factor), with a fixed 15% loss. Panel tilt and orientation
+        are not modelled.
+      parameters:
+        - $ref: "#/components/parameters/EnderecoID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SolarEconomyCalculateRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SolarEconomy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          description: No weather station with solar data yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    get:
+      tags: [solar-economy]
+      summary: Get the most recently calculated photovoltaic generation for an address
+      parameters:
+        - $ref: "#/components/parameters/EnderecoID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SolarEconomy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 components:
   securitySchemes:
     bearerAuth:
@@ -202,8 +260,8 @@ components:
     Forbidden:
       description: >
         Token lacks the permission this route needs (endereco:read for reads,
-        endereco:write to create/delete addresses, pluvial:calculate to run a
-        calculation). Accounts without access to rain-saver carry none.
+        endereco:write to create/delete addresses, pluvial:calculate or
+        solar:calculate to run a calculation). Accounts without access to rain-saver carry none.
       content:
         application/json:
           schema:
@@ -335,5 +393,84 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MonthlyCaptation"
+    SolarEconomyCalculateRequest:
+      type: object
+      required: [panel_power_w, panel_count]
+      properties:
+        panel_power_w:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+          maximum: 1000
+          description: Rated power of one panel, in watts (Wp)
+        panel_count:
+          type: integer
+          minimum: 1
+          maximum: 1000
+    MonthlyGeneration:
+      type: object
+      properties:
+        year:
+          type: integer
+        month:
+          type: integer
+          minimum: 1
+          maximum: 12
+        avg_daily_kwh_m2:
+          type: number
+          format: double
+          description: Average daily irradiation (kWh/m²/day, i.e. peak sun hours)
+        generated_kwh:
+          type: number
+          format: double
+    SolarEconomy:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        endereco_id:
+          type: string
+          format: uuid
+        panel_power_w:
+          type: number
+          format: double
+        panel_count:
+          type: integer
+        system_kwp:
+          type: number
+          format: double
+          description: panel_power_w × panel_count / 1000
+        loss_factor:
+          type: number
+          format: double
+          example: 0.15
+        period_start:
+          type: string
+          format: date-time
+        period_end:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        station_code:
+          type: string
+          description: Code of the INMET station used for this calculation
+        distance_km:
+          type: number
+          format: double
+          description: Distance in km between the address and the station used
+        total_kwh:
+          type: number
+          format: double
+          description: Sum over the months returned (up to 12)
+        monthly_avg_kwh:
+          type: number
+          format: double
+        monthly_generation:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonthlyGeneration"
 security:
   - bearerAuth: []

@@ -40,4 +40,20 @@ type WeatherStationRepository interface {
 	// happens at read time, so rain-saver stays decoupled from however the
 	// ingestion side decides to retain history.
 	MonthlyRainfall(ctx context.Context, stationCode string, months int) ([]domain.StationMonthlyRainfall, error)
+	// NearestWithSolar is Nearest restricted to stations with at least one
+	// month of solar data — many stations report rainfall but have no
+	// working pyranometer. ErrNotFound if none has solar data.
+	NearestWithSolar(ctx context.Context, latitude, longitude float64) (*domain.WeatherStation, float64, error)
+	// MonthlySolar is MonthlyRainfall for station_monthly_solar.
+	MonthlySolar(ctx context.Context, stationCode string, months int) ([]domain.StationMonthlySolar, error)
+}
+
+type SolarEconomyRepository interface {
+	// Create persists the parent row and all month rows in a single
+	// transaction and returns the fully populated result.
+	Create(ctx context.Context, se *domain.SolarEconomy, months []domain.SolarMonthlyGeneration) (*domain.SolarEconomy, error)
+	// GetLatestByEnderecoID returns the most recently created calculation
+	// for the address, with MonthlyGeneration populated, or ErrNotFound if
+	// none has ever been run.
+	GetLatestByEnderecoID(ctx context.Context, enderecoID string) (*domain.SolarEconomy, error)
 }

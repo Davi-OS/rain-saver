@@ -2,7 +2,7 @@
 
 Backend em Go que gerencia endereços e calcula/entrega economia **mensal** de captação de água de chuva para o front-end do projeto Rain Saver, usando a chuva histórica da **estação INMET mais próxima** de cada endereço. Login e contas de usuário vivem num serviço separado, o [go-auth-service](https://github.com/Davi-OS/go-auth-service) — este backend não tem cadastro/senha próprios, só valida tokens emitidos por ele.
 
-Os dados de chuva (`weather_stations`, `station_monthly_rainfall`) são povoados por um processo de ingestão do INMET separado (fora deste repositório, ainda não construído) — este backend só **lê** dessas tabelas, já compiladas por mês/estação. Veja a seção de setup local para semear dados de teste enquanto essa ingestão não existe.
+Os dados de chuva e radiação solar (`weather_stations`, `station_monthly_rainfall`, `station_monthly_solar`) são povoados pelo [inmet-rain-ingestor](https://github.com/Davi-OS/inmet-rain-ingestor) — este backend só **lê** dessas tabelas, já compiladas por mês/estação. Veja a seção de setup local para semear dados de teste sem rodar a ingestão.
 
 ## Stack
 
@@ -53,7 +53,7 @@ Isso não é uma migration — é só um fixture de desenvolvimento (`scripts/se
 
 ### 5. go-auth-service (Azure) + sistema `rain-saver`
 
-Este serviço só aceita tokens com audience `"rain-saver"` e issuer igual ao `AUTH_ISSUER` do auth, e exige as permissões `endereco:read`, `endereco:write` e `pluvial:calculate`. O auth roda na Azure (`https://ca-auth.lemonmoss-8726f7e4.northcentralus.azurecontainerapps.io`, veja o `docs/DEPLOY_AZURE.md` do go-auth-service). Configure `AUTH_SERVICE_BASE_URL` e `AUTH_ISSUER` com essa URL, como no `.env.example`. No boot, o rain-saver busca o JWKS e encerra se o auth estiver fora do ar (por exemplo, pausado).
+Este serviço só aceita tokens com audience `"rain-saver"` e issuer igual ao `AUTH_ISSUER` do auth, e exige as permissões `endereco:read`, `endereco:write`, `pluvial:calculate` e `solar:calculate`. O auth roda na Azure (`https://ca-auth.lemonmoss-8726f7e4.northcentralus.azurecontainerapps.io`, veja o `docs/DEPLOY_AZURE.md` do go-auth-service). Configure `AUTH_SERVICE_BASE_URL` e `AUTH_ISSUER` com essa URL, como no `.env.example`. No boot, o rain-saver busca o JWKS e encerra se o auth estiver fora do ar (por exemplo, pausado).
 
 O sistema é descrito em [`deploy/auth-system.json`](deploy/auth-system.json) e cadastrado uma única vez por um platform admin, sem seeds:
 
@@ -108,9 +108,12 @@ Ver `internal/http/openapi.yaml` (ou `/docs` com o servidor rodando) para a espe
 | POST / GET | `/enderecos` | `endereco:write` / `endereco:read` |
 | GET / DELETE | `/enderecos/:id` | `endereco:read` / `endereco:write` |
 | POST / GET | `/enderecos/:id/pluvial-economy` | `pluvial:calculate` / `endereco:read` |
+| POST / GET | `/enderecos/:id/solar-economy` | `solar:calculate` / `endereco:read` |
 
 `POST /enderecos` aceita `latitude`/`longitude` opcionais: sem elas o endereço é geocodificado via Nominatim (OpenStreetMap) a partir de logradouro, número, cidade e UF — `422` se não for localizado, `503` se o geocodificador estiver fora.
 
 Sem a permissão da rota a resposta é `403`. Todas as rotas protegidas exigem `Authorization: Bearer <token>` emitido pelo go-auth-service para a audience `rain-saver`; o `user_id` de cada recurso vem sempre do claim `sub` do token validado, nunca do corpo da requisição.
 
 A resposta de `pluvial-economy` inclui `station_code` e `distance_km` — qual estação INMET foi usada e a que distância do endereço, pra rastreabilidade. Se nenhuma estação estiver cadastrada ainda, o cálculo retorna `503`.
+
+`solar-economy` recebe `{panel_power_w, panel_count}` e estima a geração fotovoltaica mês a mês com a irradiação da estação mais próxima **que tenha dado solar** (`kWh = kWp × kWh/m²/dia × dias × 0,85`, perda fixa de 15%, plano horizontal). Retorna `503` se nenhuma estação tiver dado solar.

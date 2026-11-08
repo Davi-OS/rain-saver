@@ -89,6 +89,7 @@ type fakeWeatherStationRepository struct {
 	nearestErr error
 	monthly    []domain.StationMonthlyRainfall
 	monthlyErr error
+	solar      []domain.StationMonthlySolar
 }
 
 func (f *fakeWeatherStationRepository) Nearest(ctx context.Context, latitude, longitude float64) (*domain.WeatherStation, float64, error) {
@@ -100,4 +101,38 @@ func (f *fakeWeatherStationRepository) Nearest(ctx context.Context, latitude, lo
 
 func (f *fakeWeatherStationRepository) MonthlyRainfall(ctx context.Context, stationCode string, months int) ([]domain.StationMonthlyRainfall, error) {
 	return f.monthly, f.monthlyErr
+}
+
+func (f *fakeWeatherStationRepository) NearestWithSolar(ctx context.Context, latitude, longitude float64) (*domain.WeatherStation, float64, error) {
+	return f.Nearest(ctx, latitude, longitude)
+}
+
+func (f *fakeWeatherStationRepository) MonthlySolar(ctx context.Context, stationCode string, months int) ([]domain.StationMonthlySolar, error) {
+	return f.solar, f.monthlyErr
+}
+
+type fakeSolarEconomyRepository struct {
+	latestByEndereco map[string]domain.SolarEconomy
+	nextID           int
+}
+
+func newFakeSolarEconomyRepository() *fakeSolarEconomyRepository {
+	return &fakeSolarEconomyRepository{latestByEndereco: map[string]domain.SolarEconomy{}}
+}
+
+func (f *fakeSolarEconomyRepository) Create(ctx context.Context, se *domain.SolarEconomy, months []domain.SolarMonthlyGeneration) (*domain.SolarEconomy, error) {
+	f.nextID++
+	out := *se
+	out.ID = idFromInt(f.nextID)
+	out.MonthlyGeneration = months
+	f.latestByEndereco[se.EnderecoID] = out
+	return &out, nil
+}
+
+func (f *fakeSolarEconomyRepository) GetLatestByEnderecoID(ctx context.Context, enderecoID string) (*domain.SolarEconomy, error) {
+	se, ok := f.latestByEndereco[enderecoID]
+	if !ok {
+		return nil, repository.ErrNotFound
+	}
+	return &se, nil
 }

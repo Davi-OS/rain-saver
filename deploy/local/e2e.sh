@@ -222,6 +222,17 @@ req POST "$RS/enderecos/$endereco/pluvial-economy" "$dev_access" '{"area_m2":120
 assert "nearest station is A701 (Sao Paulo)" test "$(jq -r .station_code <<<"$body")" = A701
 req GET "$RS/enderecos/$endereco/pluvial-economy" "$dev_access"; check "read pluvial economy" 200
 
+echo "== solar economy (dev station fixture)"
+req POST "$RS/enderecos/$endereco/solar-economy" "$dev_access" '{"panel_power_w":0,"panel_count":1}'
+check "panel power 0 -> 400" 400
+req POST "$RS/enderecos/$endereco/solar-economy" "$dev_access" '{"panel_power_w":550,"panel_count":10}'
+check "calculate solar economy (needs solar:calculate, deploy/auth-system.json)" 201
+assert "station with solar data is A701" test "$(jq -r .station_code <<<"$body")" = A701
+assert "system is 5.5 kWp with 15% loss" jqok '.system_kwp == 5.5 and .loss_factor == 0.15' <<<"$body"
+# January fixture: 5.5 kWp × 5.6 kWh/m²/day × 31 days × 0.85 = 811.58 kWh
+assert "january 2026 generation = 811.58 kWh" jqok '.monthly_generation[] | select(.year == 2026 and .month == 1) | .generated_kwh == 811.58' <<<"$body"
+req GET "$RS/enderecos/$endereco/solar-economy" "$dev_access"; check "read solar economy" 200
+
 echo "== token rejection"
 req GET "$RS/enderecos"; check "no token -> 401" 401
 req GET "$RS/enderecos" "$admin_access"; check "token for another audience (auth) -> 401" 401

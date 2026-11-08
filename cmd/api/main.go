@@ -42,11 +42,13 @@ func main() {
 	enderecoRepo := postgres.NewEnderecoRepository(pool)
 	economyRepo := postgres.NewPluvialEconomyRepository(pool)
 	stationRepo := postgres.NewWeatherStationRepository(pool)
+	solarRepo := postgres.NewSolarEconomyRepository(pool)
 
 	enderecoSvc := service.NewEnderecoService(enderecoRepo, geocoding.NewNominatim(cfg.GeocoderURL, cfg.GeocoderUserAgent))
 	pluvialSvc := service.NewPluvialService(enderecoRepo, economyRepo, stationRepo)
+	solarSvc := service.NewSolarService(enderecoRepo, solarRepo, stationRepo)
 
-	handler := rainhttp.NewServer(enderecoSvc, pluvialSvc, authClient, cfg.CORSAllowedOrigins)
+	handler := rainhttp.NewServer(enderecoSvc, pluvialSvc, solarSvc, authClient, cfg.CORSAllowedOrigins)
 
 	httpServer := &http.Server{
 		Addr:         cfg.Addr(),

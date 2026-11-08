@@ -31,7 +31,7 @@ func NewPluvialService(enderecos repository.EnderecoRepository, economies reposi
 // address doesn't exist or doesn't belong to userID, or
 // ErrNoStationAvailable if no weather station is registered at all.
 func (s *PluvialService) Calculate(ctx context.Context, enderecoID, userID string, areaM2 float64) (*domain.PluvialEconomy, error) {
-	e, err := s.ownedEndereco(ctx, enderecoID, userID)
+	e, err := ownedEndereco(ctx, s.enderecos, enderecoID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -78,14 +78,16 @@ func (s *PluvialService) Calculate(ctx context.Context, enderecoID, userID strin
 // userID, or ErrNotFound-wrapping behavior from the repository if no
 // calculation has ever been run for it.
 func (s *PluvialService) Latest(ctx context.Context, enderecoID, userID string) (*domain.PluvialEconomy, error) {
-	if _, err := s.ownedEndereco(ctx, enderecoID, userID); err != nil {
+	if _, err := ownedEndereco(ctx, s.enderecos, enderecoID, userID); err != nil {
 		return nil, err
 	}
 	return s.economies.GetLatestByEnderecoID(ctx, enderecoID)
 }
 
-func (s *PluvialService) ownedEndereco(ctx context.Context, enderecoID, userID string) (*domain.Endereco, error) {
-	e, err := s.enderecos.GetByID(ctx, enderecoID)
+// ownedEndereco loads the address, reporting ErrEnderecoNotFound both when
+// it doesn't exist and when it belongs to someone else.
+func ownedEndereco(ctx context.Context, enderecos repository.EnderecoRepository, enderecoID, userID string) (*domain.Endereco, error) {
+	e, err := enderecos.GetByID(ctx, enderecoID)
 	if errors.Is(err, repository.ErrNotFound) {
 		return nil, ErrEnderecoNotFound
 	}
