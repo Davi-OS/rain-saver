@@ -192,6 +192,34 @@ Depois, faça o fluxo completo pelo front: login, cadastro de endereço e cálcu
 
 ## 8. Atualizações
 
+### Fluxo normal: merge, Approve, deploy
+
+1. Se o PR tem migration nova, aplique-a em produção com o `psql` (passo 3) **antes** de tudo.
+2. Merge na `main`. O workflow `Docker Publish` roda os testes e para no job `release`; o resumo da execução mostra as migrations alteradas desde a última versão.
+3. Em Actions, abra a execução e clique em **Review deployments → production → Approve and deploy**. O job incrementa o `VERSION`, publica `latest` e `vX.Y.Z` no Docker Hub, atualiza o `ca-rainsaver` com a tag explícita e espera a revisão ficar `Healthy` com o `/healthz` em 200. **Reject** cancela sem publicar nada.
+4. Se a verificação falhar, o resumo traz o comando de rollback (`az containerapp update --image <imagem anterior>`).
+
+### Setup único
+
+```sh
+# 1. Environment com revisor obrigatório, restrito à main
+jq -nc --argjson id "$(gh api user --jq .id)" \
+  '{reviewers: [{type: "User", id: $id}], deployment_branch_policy: {protected_branches: false, custom_branch_policies: true}}' |
+  gh api -X PUT repos/Davi-OS/rain-saver/environments/production --input -
+gh api -X POST repos/Davi-OS/rain-saver/environments/production/deployment-branch-policies -f name=main
+
+# 2. Docker Hub: use um token novo, só com escrita em rain-saver
+gh secret set DOCKERHUB_USERNAME -R Davi-OS/rain-saver
+gh secret set DOCKERHUB_TOKEN    -R Davi-OS/rain-saver
+
+# 3. Azure OIDC (logado com az login): cria o acesso e imprime os `gh variable set`
+./deploy/azure-oidc.sh
+```
+
+O acesso à Azure é uma credencial federada cujo subject é `repo:Davi-OS/rain-saver:environment:production`: só o job aprovado consegue logar, e o papel Contributor vale só para o `ca-rainsaver`. Não há senha da Azure guardada no GitHub.
+
+### Plano B (manual)
+
 ```sh
 docker build -t docker.io/$DOCKERHUB_USER/rain-saver:<nova-tag> . && docker push docker.io/$DOCKERHUB_USER/rain-saver:<nova-tag>
 az containerapp update -n $APP -g $RG --image docker.io/$DOCKERHUB_USER/rain-saver:<nova-tag>
