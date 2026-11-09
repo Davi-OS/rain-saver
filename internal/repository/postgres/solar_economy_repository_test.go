@@ -20,6 +20,7 @@ func TestSolarEconomyRepository_CreatePersistsParentAndMonths(t *testing.T) {
 	createTestStation(t, pool, "A701")
 
 	now := time.Now().UTC()
+	tariff := 0.95
 	se := &domain.SolarEconomy{
 		EnderecoID:  e.ID,
 		UserID:      e.UserID,
@@ -31,6 +32,8 @@ func TestSolarEconomyRepository_CreatePersistsParentAndMonths(t *testing.T) {
 		PeriodEnd:   now,
 		StationCode: "A701",
 		DistanceKm:  12.3,
+
+		TariffBRLPerKWh: &tariff,
 	}
 	months := []domain.SolarMonthlyGeneration{
 		{Year: 2026, Month: 1, AvgDailyKWhM2: 5.2, GeneratedKWh: 753.6},
@@ -51,6 +54,9 @@ func TestSolarEconomyRepository_CreatePersistsParentAndMonths(t *testing.T) {
 	}
 	if got.PanelPowerW != 550 || got.PanelCount != 10 || got.SystemKWp != 5.5 || got.LossFactor != 0.15 {
 		t.Errorf("system = %v W × %d = %v kWp, loss %v; want 550 × 10 = 5.5, loss 0.15", got.PanelPowerW, got.PanelCount, got.SystemKWp, got.LossFactor)
+	}
+	if got.TariffBRLPerKWh == nil || *got.TariffBRLPerKWh != 0.95 {
+		t.Errorf("TariffBRLPerKWh = %v, want 0.95", got.TariffBRLPerKWh)
 	}
 	if got.StationCode != "A701" || got.DistanceKm != 12.3 {
 		t.Errorf("StationCode/DistanceKm = %q/%v, want A701/12.3", got.StationCode, got.DistanceKm)

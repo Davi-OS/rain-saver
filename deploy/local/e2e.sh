@@ -225,8 +225,16 @@ req GET "$RS/enderecos/$endereco/pluvial-economy" "$dev_access"; check "read plu
 echo "== solar economy (dev station fixture)"
 req POST "$RS/enderecos/$endereco/solar-economy" "$dev_access" '{"panel_power_w":0,"panel_count":1}'
 check "panel power 0 -> 400" 400
+req POST "$RS/enderecos/$endereco/solar-economy" "$dev_access" '{"panel_power_w":550,"panel_count":1,"tariff_brl_per_kwh":0}'
+check "tariff 0 -> 400" 400
 req POST "$RS/enderecos/$endereco/solar-economy" "$dev_access" '{"panel_power_w":550,"panel_count":10}'
 check "calculate solar economy (needs solar:calculate, deploy/auth-system.json)" 201
+assert "no tariff, no savings" jqok 'has("total_savings_brl") | not' <<<"$body"
+req POST "$RS/enderecos/$endereco/solar-economy" "$dev_access" '{"panel_power_w":550,"panel_count":10,"tariff_brl_per_kwh":0.95}'
+check "calculate solar economy with a tariff" 201
+# January: 811.58 kWh × 0.95 = 771.00
+assert "january 2026 savings = R$ 771.00" jqok '.monthly_generation[] | select(.year == 2026 and .month == 1) | .savings_brl == 771' <<<"$body"
+assert "total savings is the sum of the months" jqok '.total_savings_brl == ([.monthly_generation[].savings_brl] | add * 100 | round / 100)' <<<"$body"
 assert "station with solar data is A701" test "$(jq -r .station_code <<<"$body")" = A701
 assert "system is 5.5 kWp with 15% loss" jqok '.system_kwp == 5.5 and .loss_factor == 0.15' <<<"$body"
 # January fixture: 5.5 kWp × 5.6 kWh/m²/day × 31 days × 0.85 = 811.58 kWh

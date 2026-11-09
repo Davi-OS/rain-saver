@@ -169,9 +169,11 @@ Resposta inclui `station_code`, `distance_km` e `monthly_captation: []{year, mon
 type solarCalculationRequest struct {
 	PanelPowerW float64 `json:"panel_power_w" binding:"required,gt=0,lte=1000"`
 	PanelCount  int     `json:"panel_count" binding:"required,gte=1,lte=1000"`
+	// optional; savings are only reported when set
+	TariffBRLPerKWh *float64 `json:"tariff_brl_per_kwh" binding:"omitempty,gt=0,lte=10"`
 }
 ```
-Resposta inclui `system_kwp`, `loss_factor`, `station_code`, `distance_km`, `total_kwh`, `monthly_avg_kwh` (calculados na resposta, não persistidos) e `monthly_generation: []{year, month, avg_daily_kwh_m2, generated_kwh}`. Status: 201; 400; 401; 404; **503** `{"error":"no weather station with solar data available"}`. O GET espelha o da pluvial.
+Resposta inclui `system_kwp`, `loss_factor`, `station_code`, `distance_km`, `total_kwh`, `monthly_avg_kwh` (calculados na resposta, não persistidos) e `monthly_generation: []{year, month, avg_daily_kwh_m2, generated_kwh}`. Com tarifa, inclui também `tariff_brl_per_kwh`, `total_savings_brl`, `monthly_avg_savings_brl` e `savings_brl` em cada mês (`generated_kwh × tarifa`, arredondado por mês; o total é a soma dos meses arredondados, para bater com a tabela). Só a tarifa é gravada (`solar_economy.tariff_brl_per_kwh`, nula quando não informada); a economia é derivada na leitura, em `domain.SolarEconomy`. Status: 201; 400; 401; 404; **503** `{"error":"no weather station with solar data available"}`. O GET espelha o da pluvial.
 
 Envelope de erro padrão: `{"error": "<mensagem>"}`.
 
@@ -311,6 +313,8 @@ ALTER TABLE pluvial_economy
 **`000003_endereco_bairro.up.sql`** — `ALTER TABLE enderecos ADD COLUMN bairro text NOT NULL DEFAULT ''` (bairro vindo do ViaCEP, só exibição).
 
 **`000004_solar.up.sql`** — `station_monthly_solar (station_code, year, month, avg_daily_kwh_m2, valid_days)`, escrita pelo `inmet-rain-ingestor`, e o log append-only `solar_economy` + `solar_monthly_generation`, que espelha o pluvial. Precisa rodar **antes** do ingestor novo: sem a tabela, a transação de cada estação falha, e nem a chuva é gravada.
+
+**`000005_solar_tariff.up.sql`** — `solar_economy.tariff_brl_per_kwh` (nullable): o preço do kWh informado pelo usuário. Aditiva; cálculos antigos ficam sem tarifa.
 
 `scripts/seed_dev_stations.sql` **não é uma migration** — fixture de dev que insere 2 estações reais do INMET (`A701` São Paulo - Mirante, `A652` Belo Horizonte - Cercadinho, **atenção**: no catálogo real do INMET o código `A652` na verdade corresponde a "Rio de Janeiro - Forte de Copacabana", não Belo Horizonte — o seed de dev usa esse código com um nome/cidade fictícios só para teste) com chuva mensal sintética, para exercitar o read path sem depender do `inmet-rain-ingestor`.
 

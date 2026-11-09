@@ -12,15 +12,15 @@ import (
 )
 
 const (
-	createSolarEconomyQuery = `INSERT INTO solar_economy (endereco_id, user_id, panel_power_w, panel_count, system_kwp, loss_factor, period_start, period_end, station_code, distance_km)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	createSolarEconomyQuery = `INSERT INTO solar_economy (endereco_id, user_id, panel_power_w, panel_count, system_kwp, loss_factor, period_start, period_end, station_code, distance_km, tariff_brl_per_kwh)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id::text, created_at`
 
 	createMonthlyGenerationQuery = `INSERT INTO solar_monthly_generation (solar_economy_id, year, month, avg_daily_kwh_m2, generated_kwh)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id::text`
 
-	getLatestSolarEconomyQuery = `SELECT id::text, endereco_id::text, user_id::text, panel_power_w, panel_count, system_kwp, loss_factor, period_start, period_end, created_at, station_code, distance_km
+	getLatestSolarEconomyQuery = `SELECT id::text, endereco_id::text, user_id::text, panel_power_w, panel_count, system_kwp, loss_factor, period_start, period_end, created_at, station_code, distance_km, tariff_brl_per_kwh
 		FROM solar_economy WHERE endereco_id = $1 ORDER BY created_at DESC LIMIT 1`
 
 	getMonthlyGenerationsQuery = `SELECT id::text, solar_economy_id::text, year, month, avg_daily_kwh_m2, generated_kwh
@@ -45,7 +45,7 @@ func (r *SolarEconomyRepository) Create(ctx context.Context, se *domain.SolarEco
 	out := *se
 	if err := tx.QueryRow(ctx, createSolarEconomyQuery,
 		se.EnderecoID, se.UserID, se.PanelPowerW, se.PanelCount, se.SystemKWp, se.LossFactor,
-		se.PeriodStart, se.PeriodEnd, se.StationCode, se.DistanceKm,
+		se.PeriodStart, se.PeriodEnd, se.StationCode, se.DistanceKm, se.TariffBRLPerKWh,
 	).Scan(&out.ID, &out.CreatedAt); err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (r *SolarEconomyRepository) GetLatestByEnderecoID(ctx context.Context, ende
 	var out domain.SolarEconomy
 	err := r.pool.QueryRow(ctx, getLatestSolarEconomyQuery, enderecoID).
 		Scan(&out.ID, &out.EnderecoID, &out.UserID, &out.PanelPowerW, &out.PanelCount, &out.SystemKWp, &out.LossFactor,
-			&out.PeriodStart, &out.PeriodEnd, &out.CreatedAt, &out.StationCode, &out.DistanceKm)
+			&out.PeriodStart, &out.PeriodEnd, &out.CreatedAt, &out.StationCode, &out.DistanceKm, &out.TariffBRLPerKWh)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, repository.ErrNotFound
 	}

@@ -25,7 +25,7 @@ func TestSolarService_CalculateComputesGeneration(t *testing.T) {
 	e, _ := enderecoRepo.Create(context.Background(), newTestEndereco())
 
 	// 10 panels of 550 W = 5.5 kWp.
-	se, err := svc.Calculate(context.Background(), e.ID, e.UserID, 550, 10)
+	se, err := svc.Calculate(context.Background(), e.ID, e.UserID, 550, 10, nil)
 	if err != nil {
 		t.Fatalf("Calculate() error = %v", err)
 	}
@@ -57,13 +57,36 @@ func TestSolarService_CalculateComputesGeneration(t *testing.T) {
 	}
 }
 
+func TestSolarService_CalculateRecordsTheTariff(t *testing.T) {
+	enderecoRepo := newFakeEnderecoRepository()
+	stations := &fakeWeatherStationRepository{
+		station: testStation(),
+		solar:   []domain.StationMonthlySolar{{StationCode: "A701", Year: 2025, Month: 4, AvgDailyKWhM2: 5}},
+	}
+	svc := NewSolarService(enderecoRepo, newFakeSolarEconomyRepository(), stations)
+	e, _ := enderecoRepo.Create(context.Background(), newTestEndereco())
+
+	tariff := 0.95
+	se, err := svc.Calculate(context.Background(), e.ID, e.UserID, 550, 10, &tariff)
+	if err != nil {
+		t.Fatalf("Calculate() error = %v", err)
+	}
+	if se.TariffBRLPerKWh == nil || *se.TariffBRLPerKWh != 0.95 {
+		t.Errorf("TariffBRLPerKWh = %v, want 0.95", se.TariffBRLPerKWh)
+	}
+	// 701.25 kWh × 0.95 = 666.19
+	if got, _ := se.TotalSavingsBRL(); got != 666.19 {
+		t.Errorf("TotalSavingsBRL() = %v, want 666.19", got)
+	}
+}
+
 func TestSolarService_CalculateReturnsNotFoundForWrongOwner(t *testing.T) {
 	enderecoRepo := newFakeEnderecoRepository()
 	svc := NewSolarService(enderecoRepo, newFakeSolarEconomyRepository(), &fakeWeatherStationRepository{station: testStation()})
 
 	e, _ := enderecoRepo.Create(context.Background(), newTestEndereco())
 
-	if _, err := svc.Calculate(context.Background(), e.ID, "someone-else", 550, 1); !errors.Is(err, ErrEnderecoNotFound) {
+	if _, err := svc.Calculate(context.Background(), e.ID, "someone-else", 550, 1, nil); !errors.Is(err, ErrEnderecoNotFound) {
 		t.Errorf("Calculate() error = %v, want ErrEnderecoNotFound", err)
 	}
 }
@@ -74,7 +97,7 @@ func TestSolarService_CalculateReturnsErrNoSolarStationAvailable(t *testing.T) {
 
 	e, _ := enderecoRepo.Create(context.Background(), newTestEndereco())
 
-	if _, err := svc.Calculate(context.Background(), e.ID, e.UserID, 550, 1); !errors.Is(err, ErrNoSolarStationAvailable) {
+	if _, err := svc.Calculate(context.Background(), e.ID, e.UserID, 550, 1, nil); !errors.Is(err, ErrNoSolarStationAvailable) {
 		t.Errorf("Calculate() error = %v, want ErrNoSolarStationAvailable", err)
 	}
 }
