@@ -407,6 +407,14 @@ components:
           type: integer
           minimum: 1
           maximum: 1000
+        tariff_brl_per_kwh:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+          maximum: 10
+          description: >
+            Optional price of one kWh in R$. When set, the response reports
+            the savings (generation × tariff).
     MonthlyGeneration:
       type: object
       properties:
@@ -423,6 +431,10 @@ components:
         generated_kwh:
           type: number
           format: double
+        savings_brl:
+          type: number
+          format: double
+          description: generated_kwh × tariff_brl_per_kwh; absent without a tariff
     SolarEconomy:
       type: object
       properties:
@@ -466,6 +478,17 @@ components:
           format: double
           description: Sum over the months returned (up to 12)
         monthly_avg_kwh:
+          type: number
+          format: double
+        tariff_brl_per_kwh:
+          type: number
+          format: double
+          description: Tariff entered for this calculation; absent if none
+        total_savings_brl:
+          type: number
+          format: double
+          description: Sum of the monthly savings_brl; absent without a tariff
+        monthly_avg_savings_brl:
           type: number
           format: double
         monthly_generation:

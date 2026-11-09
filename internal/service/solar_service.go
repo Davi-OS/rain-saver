@@ -34,11 +34,12 @@ func NewSolarService(enderecos repository.EnderecoRepository, economies reposito
 //	kWh = kWp × avg_daily_kwh_m2 × days_in_month × (1 − loss)
 //
 // Irradiation is measured on the horizontal plane; panel tilt and
-// orientation are not modelled. Persists the result like PluvialService.
+// orientation are not modelled. tariffBRLPerKWh is optional and only
+// recorded: savings are derived from it when the result is read. Persists the result like PluvialService.
 // Returns ErrEnderecoNotFound if the address doesn't exist or doesn't
 // belong to userID, or ErrNoSolarStationAvailable if no station has solar
 // data.
-func (s *SolarService) Calculate(ctx context.Context, enderecoID, userID string, panelPowerW float64, panelCount int) (*domain.SolarEconomy, error) {
+func (s *SolarService) Calculate(ctx context.Context, enderecoID, userID string, panelPowerW float64, panelCount int, tariffBRLPerKWh *float64) (*domain.SolarEconomy, error) {
 	e, err := ownedEndereco(ctx, s.enderecos, enderecoID, userID)
 	if err != nil {
 		return nil, err
@@ -70,6 +71,8 @@ func (s *SolarService) Calculate(ctx context.Context, enderecoID, userID string,
 		PeriodEnd:   now,
 		StationCode: station.Code,
 		DistanceKm:  roundToTwoDecimals(distanceKm),
+
+		TariffBRLPerKWh: tariffBRLPerKWh,
 	}
 
 	months := make([]domain.SolarMonthlyGeneration, len(monthly))
