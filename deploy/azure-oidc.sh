@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-off setup so the "release" job of .github/workflows/docker-publish.yml
 # can log in to Azure without a stored password (GitHub OIDC), and nothing
-# else can: the federated credential only matches the job that runs under the
+# else can: the federated credentials only match the job that runs under the
 # "production" environment (i.e. after the manual approval), and the role is
 # scoped to the single Container App, not the resource group.
 #
@@ -26,15 +26,25 @@ if [ -z "$CLIENT_ID" ]; then
 fi
 az ad sp show --id "$CLIENT_ID" >/dev/null 2>&1 || az ad sp create --id "$CLIENT_ID" >/dev/null
 
-SUBJECT="repo:$GH_REPO:environment:$ENVIRONMENT"
-if [ -z "$(az ad app federated-credential list --id "$CLIENT_ID" --query "[?subject=='$SUBJECT'].name | [0]" -o tsv)" ]; then
-  az ad app federated-credential create --id "$CLIENT_ID" --parameters "$(jq -nc --arg s "$SUBJECT" '{
-    name: "github-production",
-    issuer: "https://token.actions.githubusercontent.com",
-    subject: $s,
-    audiences: ["api://AzureADTokenExchange"]
-  }')" >/dev/null
-fi
+# GitHub sends the subject in one of two shapes depending on the repository
+# (names, or names plus numeric ids: repo:OWNER@ID/NAME@ID:environment:ENV).
+# Azure needs an exact match, so both are registered.
+OWNER_ID=$(gh api "repos/$GH_REPO" --jq .owner.id)
+REPO_ID=$(gh api "repos/$GH_REPO" --jq .id)
+OWNER=${GH_REPO%%/*}
+NAME=${GH_REPO#*/}
+add_credential() { # name subject
+  if [ -z "$(az ad app federated-credential list --id "$CLIENT_ID" --query "[?subject=='$2'].name | [0]" -o tsv)" ]; then
+    az ad app federated-credential create --id "$CLIENT_ID" --parameters "$(jq -nc --arg n "$1" --arg s "$2" '{
+      name: $n,
+      issuer: "https://token.actions.githubusercontent.com",
+      subject: $s,
+      audiences: ["api://AzureADTokenExchange"]
+    }')" >/dev/null
+  fi
+}
+add_credential github-production "repo:$GH_REPO:environment:$ENVIRONMENT"
+add_credential github-production-by-id "repo:$OWNER@$OWNER_ID/$NAME@$REPO_ID:environment:$ENVIRONMENT"
 
 az role assignment create --assignee "$CLIENT_ID" --role Contributor --scope "$APP_SCOPE" >/dev/null 2>&1 || true
 
