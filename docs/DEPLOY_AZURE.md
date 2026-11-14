@@ -216,7 +216,7 @@ gh secret set DOCKERHUB_TOKEN    -R Davi-OS/rain-saver
 ./deploy/azure-oidc.sh
 ```
 
-O acesso à Azure é uma credencial federada cujo subject é `repo:Davi-OS/rain-saver:environment:production`: só o job aprovado consegue logar, e o papel Contributor vale só para o `ca-rainsaver`. Não há senha da Azure guardada no GitHub.
+O acesso à Azure é uma credencial federada cujo subject é `repo:Davi-OS/rain-saver:environment:production`. O GitHub pode mandar o subject com os IDs numéricos (`repo:Davi-OS@<id>/rain-saver@<id>:environment:production`, foi o que aconteceu no primeiro release), e a Azure exige igualdade exata, então o script cadastra os dois formatos. Só o job aprovado consegue logar, e o papel Contributor vale só para o `ca-rainsaver`. Não há senha da Azure guardada no GitHub.
 
 ### Plano B (manual)
 
