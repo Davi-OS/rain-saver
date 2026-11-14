@@ -348,7 +348,11 @@ ALTER TABLE pluvial_economy
 - **Dockerfile** (multi-stage): builder `golang:1.25-alpine`; todas as dependências são públicas, então `docker build -t rain-saver .` não precisa de credencial.
   Runtime: `alpine:3.20`, usuário não-root `appuser` (uid 10001), `EXPOSE 8081`.
 - **docker-compose.yml**: só o serviço `postgres` (a API roda via `go run`/binário, fora do compose), porta `5433:5432`.
-- **CI/CD**: não existe `.github/workflows` neste repositório — nenhuma pipeline configurada até o momento.
+- **CI/CD** (`.github/workflows/docker-publish.yml`, adaptado do go-auth-service):
+  - `test` roda em todo push e PR (Postgres 16 de serviço, migrations, `go test ./...`).
+  - Na `main`, `preflight` lista no resumo as migrations alteradas desde a última release, e `release` fica parado no environment `production` até alguém clicar em **Approve**. Depois do clique: bump do `VERSION` (commit `[skip ci]`), build `linux/amd64`, push `latest` + `vX.Y.Z` no Docker Hub, login na Azure por OIDC, `az containerapp update` com a tag explícita e verificação do `/healthz`. Rejeitar não consome versão nem publica nada.
+  - Migrations **não** rodam na pipeline: continuam manuais e antes do Approve.
+  - Setup único (environment, secrets, OIDC): `docs/DEPLOY_AZURE.md`, seção 8.
 
 ## Testes
 

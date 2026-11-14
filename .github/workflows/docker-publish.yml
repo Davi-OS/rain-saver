@@ -1,0 +1,190 @@
+name: Docker Publish
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: rainsaver
+          POSTGRES_PASSWORD: rainsaver
+          POSTGRES_DB: rainsaver_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rainsaver"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      TEST_DATABASE_URL: postgres://rainsaver:rainsaver@localhost:5432/rainsaver_test?sslmode=disable
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Apply migrations
+        run: for f in migrations/*.up.sql; do psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
+
+      - name: Run tests
+        run: go test ./...
+
+  # Tells whoever is about to approve the release whether a migration has to
+  # be applied to production first. Migrations stay manual on purpose: the
+  # order migration -> image is what keeps the old and new code compatible.
+  preflight:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: List migrations added since the last release
+        run: |
+          last="$(git log -1 --format=%H -- VERSION)"
+          changed="$(git diff --name-only --diff-filter=AM "$last" HEAD -- migrations)"
+          {
+            echo "## Before approving"
+            echo "Last release: \`v$(cat VERSION)\` (commit \`${last:0:7}\`)."
+            if [ -n "$changed" ]; then
+              echo
+              echo "**Migrations added or changed since then — apply them to production BEFORE approving:**"
+              echo '```'
+              echo "$changed"
+              echo '```'
+            else
+              echo "No migration changed since then."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Waits for a manual approval of the "production" environment (Settings ->
+  # Environments), so nothing is pushed or deployed until someone clicks
+  # Approve. Rejecting it leaves VERSION and Docker Hub untouched.
+  release:
+    needs: [test, preflight]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+
+    concurrency:
+      group: release
+      cancel-in-progress: false
+
+    permissions:
+      contents: write
+      id-token: write
+
+    env:
+      IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/rain-saver
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          current="$(cat VERSION)"
+          IFS='.' read -r major minor patch <<< "$current"
+          new_version="$major.$minor.$((patch + 1))"
+          echo "$new_version" > VERSION
+          echo "new_version=$new_version" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: bump version to v${{ steps.bump.outputs.new_version }} [skip ci]"
+          git push origin HEAD:main
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Container Apps runs amd64, so there is no multi-arch build (and no
+      # QEMU) here.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:v${{ steps.bump.outputs.new_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Always the explicit version tag, never latest.
+      - name: Deploy to Container Apps
+        id: deploy
+        run: |
+          previous="$(az containerapp show -g "$RG" -n "$APP" --query "properties.template.containers[0].image" -o tsv)"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          az containerapp update -g "$RG" -n "$APP" --image "$IMAGE" --query properties.latestRevisionName -o tsv
+        env:
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+          APP: ${{ vars.AZURE_CONTAINER_APP }}
+          IMAGE: ${{ env.IMAGE_NAME }}:v${{ steps.bump.outputs.new_version }}
+
+      - name: Wait for the new revision and check /healthz
+        run: |
+          fqdn="$(az containerapp show -g "$RG" -n "$APP" --query properties.configuration.ingress.fqdn -o tsv)"
+          for i in $(seq 1 40); do
+            health="$(az containerapp revision list -g "$RG" -n "$APP" --query "[?properties.trafficWeight==\`100\`].properties.healthState | [0]" -o tsv)"
+            code="$(curl -s -o /dev/null -w '%{http_code}' "https://$fqdn/healthz" || true)"
+            echo "attempt $i: revision health=$health /healthz=$code"
+            if [ "$health" = "Healthy" ] && [ "$code" = "200" ]; then
+              echo "## Deployed \`v${{ steps.bump.outputs.new_version }}\`" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 6
+          done
+          {
+            echo "## Deploy of \`v${{ steps.bump.outputs.new_version }}\` did not become healthy"
+            echo "Roll back to the previous image:"
+            echo '```'
+            echo "az containerapp update -g $RG -n $APP --image ${{ steps.deploy.outputs.previous }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+        env:
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+          APP: ${{ vars.AZURE_CONTAINER_APP }}

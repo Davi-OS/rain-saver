@@ -79,6 +79,10 @@ go run ./cmd/api
 
 Serve em `http://localhost:8081`. Docs em `/docs`, spec em `/openapi.yaml`, healthcheck em `/healthz`.
 
+## CI e release
+
+`.github/workflows/docker-publish.yml` roda os testes em todo push e PR. Em push na `main`, o job `release` espera a aprovação do environment `production` (botão **Review deployments → Approve** na aba Actions) e só então publica a imagem no Docker Hub e atualiza o Container App na Azure. Migrations novas continuam manuais e têm que estar aplicadas antes do Approve (o resumo da execução avisa). Detalhes em `docs/DEPLOY_AZURE.md`, seção 8.
+
 ## Testes
 
 ```bash
