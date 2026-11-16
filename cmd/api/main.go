@@ -47,8 +47,9 @@ func main() {
 	enderecoSvc := service.NewEnderecoService(enderecoRepo, geocoding.NewNominatim(cfg.GeocoderURL, cfg.GeocoderUserAgent))
 	pluvialSvc := service.NewPluvialService(enderecoRepo, economyRepo, stationRepo)
 	solarSvc := service.NewSolarService(enderecoRepo, solarRepo, stationRepo)
+	stationSvc := service.NewStationService(stationRepo)
 
-	handler := rainhttp.NewServer(enderecoSvc, pluvialSvc, solarSvc, authClient, cfg.CORSAllowedOrigins)
+	handler := rainhttp.NewServer(enderecoSvc, pluvialSvc, solarSvc, stationSvc, authClient, cfg.CORSAllowedOrigins)
 
 	httpServer := &http.Server{
 		Addr:         cfg.Addr(),

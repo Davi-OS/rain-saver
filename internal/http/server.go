@@ -14,17 +14,18 @@ type Server struct {
 	enderecos  *service.EnderecoService
 	pluvial    *service.PluvialService
 	solar      *service.SolarService
+	stations   *service.StationService
 	authClient *authsdk.Client
 }
 
 // allowedOrigins configures CORS for browser clients (empty disables it).
-func NewServer(enderecos *service.EnderecoService, pluvial *service.PluvialService, solar *service.SolarService, authClient *authsdk.Client, allowedOrigins []string) *Server {
+func NewServer(enderecos *service.EnderecoService, pluvial *service.PluvialService, solar *service.SolarService, stations *service.StationService, authClient *authsdk.Client, allowedOrigins []string) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
 	router.Use(gin.Recovery(), corsMiddleware(allowedOrigins), maxBodySizeMiddleware)
 
-	s := &Server{router: router, enderecos: enderecos, pluvial: pluvial, solar: solar, authClient: authClient}
+	s := &Server{router: router, enderecos: enderecos, pluvial: pluvial, solar: solar, stations: stations, authClient: authClient}
 	s.routes()
 	return s
 }
@@ -46,6 +47,9 @@ func (s *Server) routes() {
 	s.router.GET("/openapi.yaml", s.handleOpenAPISpec)
 	s.router.GET("/docs", s.handleDocs)
 	s.router.GET("/healthz", s.handleHealthz)
+	// Public: INMET station coordinates are open data, and the home page
+	// shows them before login.
+	s.router.GET("/estacoes", s.handleListStations)
 
 	protected := s.router.Group("/")
 	protected.Use(RequireAuth(s.authClient))
