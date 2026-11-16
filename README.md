@@ -109,6 +109,7 @@ Ver `internal/http/openapi.yaml` (ou `/docs` com o servidor rodando) para a espe
 |---|---|---|
 | GET | `/healthz` | — (público) |
 | GET | `/openapi.yaml`, `/docs` | — (público) |
+| GET | `/estacoes` | — (público) |
 | POST / GET | `/enderecos` | `endereco:write` / `endereco:read` |
 | GET / DELETE | `/enderecos/:id` | `endereco:read` / `endereco:write` |
 | POST / GET | `/enderecos/:id/pluvial-economy` | `pluvial:calculate` / `endereco:read` |

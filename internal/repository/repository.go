@@ -48,6 +48,9 @@ type WeatherStationRepository interface {
 	NearestWithSolar(ctx context.Context, latitude, longitude float64) (*domain.WeatherStation, float64, error)
 	// MonthlySolar is MonthlyRainfall for station_monthly_solar.
 	MonthlySolar(ctx context.Context, stationCode string, months int) ([]domain.StationMonthlySolar, error)
+	// List returns every registered station, ordered by code. Empty (not
+	// ErrNotFound) when none is registered.
+	List(ctx context.Context) ([]domain.WeatherStation, error)
 }
 
 type SolarEconomyRepository interface {

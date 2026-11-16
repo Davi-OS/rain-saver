@@ -15,6 +15,7 @@ tags:
   - name: enderecos
   - name: pluvial-economy
   - name: solar-economy
+  - name: estacoes
   - name: health
 paths:
   /healthz:
@@ -33,6 +34,20 @@ paths:
                   status:
                     type: string
                     example: ok
+  /estacoes:
+    get:
+      tags: [estacoes]
+      summary: List every INMET weather station we have mapped
+      security: []
+      responses:
+        "200":
+          description: Stations ordered by code
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Estacao"
   /enderecos:
     post:
       tags: [enderecos]
@@ -273,6 +288,23 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
   schemas:
+    Estacao:
+      type: object
+      properties:
+        code:
+          type: string
+          example: A701
+        name:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        uf:
+          type: string
+          description: Empty when the station has no state recorded
     Error:
       type: object
       properties:

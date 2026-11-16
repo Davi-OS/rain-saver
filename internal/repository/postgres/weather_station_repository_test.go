@@ -201,3 +201,35 @@ func TestWeatherStationRepository_MonthlyRainfall_UnknownStation(t *testing.T) {
 		t.Errorf("got %d rows, want 0", len(got))
 	}
 }
+
+func TestWeatherStationRepository_List(t *testing.T) {
+	pool := testPool(t)
+	repo := NewWeatherStationRepository(pool)
+	ctx := context.Background()
+
+	got, err := repo.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("List() on empty table = %d stations, want 0", len(got))
+	}
+
+	_, err = pool.Exec(ctx, `INSERT INTO weather_stations (code, name, latitude, longitude, uf) VALUES
+		('A701', 'SAO PAULO - MIRANTE', -23.4977, -46.6202, 'SP'),
+		('A001', 'BRASILIA', -15.7893, -47.9258, NULL)`)
+	if err != nil {
+		t.Fatalf("seed stations: %v", err)
+	}
+
+	got, err = repo.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(got) != 2 || got[0].Code != "A001" || got[1].Code != "A701" {
+		t.Fatalf("List() = %+v, want A001 then A701", got)
+	}
+	if got[0].UF != "" {
+		t.Errorf("List() NULL uf = %q, want empty", got[0].UF)
+	}
+}

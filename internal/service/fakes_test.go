@@ -111,6 +111,10 @@ func (f *fakeWeatherStationRepository) MonthlySolar(ctx context.Context, station
 	return f.solar, f.monthlyErr
 }
 
+func (f *fakeWeatherStationRepository) List(ctx context.Context) ([]domain.WeatherStation, error) {
+	return nil, nil
+}
+
 type fakeSolarEconomyRepository struct {
 	latestByEndereco map[string]domain.SolarEconomy
 	nextID           int

@@ -39,6 +39,11 @@ const (
 		ORDER BY distance_km ASC
 		LIMIT 1`
 
+	// uf is nullable in the schema; the domain type holds a plain string.
+	listStationsQuery = `SELECT code, name, latitude, longitude, COALESCE(uf, ''), created_at
+		FROM weather_stations
+		ORDER BY code`
+
 	monthlyRainfallQuery = `SELECT station_code, year, month, rainfall_mm FROM (
 		SELECT station_code, year, month, rainfall_mm
 		FROM station_monthly_rainfall
@@ -120,6 +125,24 @@ func (r *WeatherStationRepository) MonthlySolar(ctx context.Context, stationCode
 			return nil, err
 		}
 		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+func (r *WeatherStationRepository) List(ctx context.Context) ([]domain.WeatherStation, error) {
+	rows, err := r.pool.Query(ctx, listStationsQuery)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []domain.WeatherStation
+	for rows.Next() {
+		var s domain.WeatherStation
+		if err := rows.Scan(&s.Code, &s.Name, &s.Latitude, &s.Longitude, &s.UF, &s.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
 	}
 	return out, rows.Err()
 }

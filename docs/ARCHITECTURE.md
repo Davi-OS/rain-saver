@@ -117,13 +117,14 @@ Não existe struct `User`: identidade vive inteiramente no go-auth-service; `end
 
 ## Endpoints HTTP
 
-Middleware global: `gin.Recovery()`, CORS (`CORS_ALLOWED_ORIGINS`) + limite de 1MB no corpo da requisição. Todas as rotas exceto `/openapi.yaml`, `/docs` e `/healthz` exigem `RequireAuth` **e** uma permissão do sistema `rain-saver` (`RequirePermission`, 403 sem ela).
+Middleware global: `gin.Recovery()`, CORS (`CORS_ALLOWED_ORIGINS`) + limite de 1MB no corpo da requisição. Todas as rotas exceto `/openapi.yaml`, `/docs`, `/healthz` e `/estacoes` exigem `RequireAuth` **e** uma permissão do sistema `rain-saver` (`RequirePermission`, 403 sem ela).
 
 | Método | Rota | Permissão | Descrição |
 |---|---|---|---|
 | GET | `/openapi.yaml` | — (público) | Spec OpenAPI 3.0.3 embutida no binário |
 | GET | `/docs` | — (público) | Swagger UI apontando para `/openapi.yaml` |
 | GET | `/healthz` | — (público) | `{"status":"ok"}` |
+| GET | `/estacoes` | — (público) | Todas as estações (`code`, `name`, `latitude`, `longitude`, `uf`), ordenadas por código; alimenta o mapa da home do front |
 | POST | `/enderecos` | `endereco:write` | Cria endereço do usuário autenticado (geocodifica se faltar lat/lng) |
 | GET | `/enderecos` | `endereco:read` | Lista endereços do usuário autenticado |
 | GET | `/enderecos/:id` | `endereco:read` | Busca um endereço (ownership obrigatório) |
